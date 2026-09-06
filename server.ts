@@ -278,7 +278,190 @@ const callAnalysisSchema = {
   ]
 };
 
-// Analyze call endpoint with Level 1 cascade & exponential backoff
+// Groq Ultra-Fast Speech-to-Text & QA Engine
+async function analyzeWithGroq(
+  groqKey: string,
+  audioBase64: string,
+  fileName: string,
+  agentName: string,
+  queue: string,
+  promptText: string,
+  initialTranscript?: string
+) {
+  let transcriptText = initialTranscript || '';
+  let durationSec = 180;
+  let whisperSegments: any[] = [];
+
+  // Step 1: Transcribe with Whisper Large v3 Turbo on Groq
+  if (audioBase64 && !transcriptText) {
+    const audioBuf = Buffer.from(audioBase64, 'base64');
+    const audioBlob = new Blob([audioBuf], { type: 'audio/wav' });
+    const formData = new FormData();
+    formData.append('file', audioBlob, fileName || 'audio.wav');
+    formData.append('model', 'whisper-large-v3-turbo');
+    formData.append('language', 'es');
+    formData.append('response_format', 'verbose_json');
+
+    const whisperRes = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${groqKey}`
+      },
+      body: formData
+    });
+
+    if (!whisperRes.ok) {
+      const errText = await whisperRes.text();
+      throw new Error(`Groq Whisper error (${whisperRes.status}): ${errText}`);
+    }
+
+    const whisperData = (await whisperRes.json()) as any;
+    transcriptText = whisperData.text || '';
+    durationSec = Math.max(10, Math.round(whisperData.duration || 180));
+
+    if (Array.isArray(whisperData.segments)) {
+      whisperSegments = whisperData.segments.map((seg: any, idx: number) => ({
+        id: `sg-${idx + 1}`,
+        hablante: idx % 2 === 0 ? 'agente' : 'cliente',
+        inicio: Math.round(seg.start || 0),
+        fin: Math.round(seg.end || 5),
+        texto: seg.text?.trim() || '',
+        sentimientoScore: 0.0
+      }));
+    }
+  }
+
+  // Step 2: Perform QA Speech Analytics with LLaMA 3.3 70B on Groq
+  const auditPrompt = `${promptText}
+
+TRANSCRIPCIÓN REAL LITERAL OBTENIDA VÍA WHISPER:
+${transcriptText || 'Audio de llamada de contact center.'}
+
+Responde ÚNICAMENTE con un JSON válido que contenga la estructura exacta solicitada:
+{
+  "resumen": "...",
+  "motivo_categoria": "soporte|ventas|reclamos|bajas|facturacion",
+  "motivo_nombre": "...",
+  "sentimiento_score": 0.0,
+  "evaluacion_criterios": {
+    "amabilidad_empatia": { "nota": 85, "diagnostico": "..." },
+    "seguridad_expresarse": { "nota": 90, "diagnostico": "..." },
+    "claridad_informacion": { "nota": 80, "diagnostico": "..." },
+    "tiempos_espera_hold": { "nota": 75, "diagnostico": "..." },
+    "eficiencia_tmo": { "nota": 85, "diagnostico": "..." }
+  },
+  "cumplimiento_guion": {
+    "saludo_institucional": true,
+    "verificacion_identidad": true,
+    "escucha_activa": true,
+    "entrega_ticket_subtel": true,
+    "despedida_cordial": true,
+    "ofrecimiento_ayuda": true,
+    "politica_privacidad": true
+  },
+  "nps_pronostico": {
+    "score": 8,
+    "clasificacion": "PROMOTOR",
+    "pregunta": "¿Qué tan probable es que recomiendes Claro a un amigo o familiar?",
+    "justificacion": "..."
+  },
+  "silencio_analisis": {
+    "duracion_total_segundos": ${durationSec},
+    "tiempo_ivr_segundos": 45,
+    "tiempo_agente_segundos": ${durationSec - 45},
+    "silencio_agente_segundos": 15,
+    "porcentaje_silencio": 8,
+    "nivel_silencio": "ÓPTIMO",
+    "diagnostico_silencio": "..."
+  },
+  "quiebres_atencion": [],
+  "feedback_coaching": {
+    "fortalezas": ["..."],
+    "oportunidades_mejora": ["..."],
+    "guion_sugerido_alternativo": "...",
+    "plan_accion": "..."
+  },
+  "keywords": ["Claro Chile", "RUT", "Boleta"],
+  "alertas": [],
+  "csat_estimado": 4,
+  "resolucion_primer_contacto": true,
+  "agente_nombre_detectado": "${agentName}",
+  "cliente_nombre_detectado": "Cliente Claro",
+  "segmentos": []
+}`;
+
+  const chatRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${groqKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: 'llama-3.3-70b-versatile',
+      messages: [
+        {
+          role: 'system',
+          content: 'Eres el auditor principal de Calidad y Speech Analytics para Claro Chile. Devuelve tu análisis exclusivamente en formato JSON estructurado.'
+        },
+        {
+          role: 'user',
+          content: auditPrompt
+        }
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.1
+    })
+  });
+
+  if (!chatRes.ok) {
+    const errText = await chatRes.text();
+    throw new Error(`Groq LLaMA error (${chatRes.status}): ${errText}`);
+  }
+
+  const chatData = (await chatRes.json()) as any;
+  const rawJson = chatData.choices?.[0]?.message?.content || '{}';
+  const parsed = JSON.parse(rawJson);
+
+  const finalSegments = (parsed.segmentos && parsed.segmentos.length > 0)
+    ? parsed.segmentos
+    : (whisperSegments.length > 0 ? whisperSegments : [
+        { id: 'sg1', hablante: 'agente', inicio: 0, fin: 5, texto: transcriptText.slice(0, 100), sentimientoScore: 0.2 }
+      ]);
+
+  const crits = parsed.evaluacion_criterios;
+  const avgScore = crits ? Math.round(
+    (crits.amabilidad_empatia.nota +
+     crits.seguridad_expresarse.nota +
+     crits.claridad_informacion.nota +
+     crits.tiempos_espera_hold.nota +
+     crits.eficiencia_tmo.nota) / 5
+  ) : 80;
+
+  const completeRecord = {
+    id: `call-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+    codigo_llamada: `REC-2026-CHILE-${Math.floor(1000 + Math.random() * 9000)}`,
+    fecha_hora: new Date().toISOString().replace('T', ' ').substring(0, 16),
+    agente_nombre: parsed.agente_nombre_detectado || agentName,
+    agente_id: `AG-${Math.floor(7000 + Math.random() * 3000)}`,
+    cliente_nombre: parsed.cliente_nombre_detectado || 'Cliente Claro',
+    cliente_telefono: '+56 9 ' + Math.floor(60000000 + Math.random() * 39999999),
+    cola_atencion: queue,
+    duracion_total: formatSeconds(parsed.silencio_analisis?.duracion_total_segundos || durationSec),
+    duracion_segundos: parsed.silencio_analisis?.duracion_total_segundos || durationSec,
+    qa_score_global: avgScore,
+    sentimiento_label: (parsed.sentimiento_score ?? 0) > 0.2 ? 'Positivo' : (parsed.sentimiento_score ?? 0) < -0.2 ? 'Negativo' : 'Neutro',
+    modelo_procesado: 'Groq (Whisper-Large-v3 + Llama-3.3-70b)',
+    ...parsed,
+    segmentos: finalSegments,
+    transcripcion: {
+      segmentos: finalSegments
+    }
+  };
+
+  return completeRecord;
+}
+
+// Analyze call endpoint with Groq primary and Gemini Multi-Key fallback
 app.post('/api/analyze-call', async (req, res) => {
   const {
     audioBase64,
@@ -289,22 +472,6 @@ app.post('/api/analyze-call', async (req, res) => {
     queue = 'Exclusivo Postpago Chile',
     requestedModelCascade = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
   } = req.body;
-
-  const apiKeys = getApiKeys();
-
-  // If no Gemini API key, generate realistic intelligent QA analysis directly
-  if (apiKeys.length === 0) {
-    const fallbackResult = generateRealisticMockAnalysis(fileName, agentName, queue, transcriptText);
-    return res.json({
-      success: true,
-      data: fallbackResult,
-      meta: {
-        engine: 'Intelligent Heuristics (Configure GEMINI_API_KEY for live AI)',
-        modelUsed: 'local-qa-engine',
-        retries: 0
-      }
-    });
-  }
 
   const prompt = `Eres un auditor experto en Speech Analytics y Aseguramiento de la Calidad (QA) para Contact Centers de Claro en Chile.
 
@@ -358,6 +525,50 @@ AUDITORÍA DE CALIDAD Y SPEECH ANALYTICS (CLARO CHILE):
 3. Pronóstico de NPS con la pregunta oficial: "¿Qué tan probable es que recomiendes Claro a un amigo o familiar? Considerando una escala de 0 a 10, donde 0 es 'Nada probable' y 10 es 'Muy probable'". Clasifica en DETRACTOR (0-6), NEUTRO (7-8) o PROMOTOR (9-10), justificando ampliamente el motivo de la calificación.
 4. Tiempo de Silencio Conversacional: Evalúa el silencio considerando ÚNICAMENTE desde que le ingresa la llamada al agente y puede interactuar, separándolo del IVR previo.
 5. Plan de coaching y feedback accionable para el asesor, incluyendo guion sugerido alternativo y plan de acción.`;
+
+  // 1. First priority: Groq Ultra-Fast Whisper + LLaMA 3.3 Engine
+  const groqKey = process.env.GROQ_API_KEY;
+  if (groqKey) {
+    try {
+      console.log('[Engine] Procesando llamada con Groq (Whisper-v3 + Llama-3.3-70b)...');
+      const groqResult = await analyzeWithGroq(
+        groqKey,
+        audioBase64,
+        fileName,
+        agentName,
+        queue,
+        prompt,
+        transcriptText
+      );
+      return res.status(200).json({
+        success: true,
+        data: groqResult,
+        meta: {
+          engine: 'Groq Ultra-Fast (Whisper-v3 + LLaMA-3.3-70B)',
+          modelUsed: 'whisper-large-v3-turbo / llama-3.3-70b',
+          latency: 'ultra-low'
+        }
+      });
+    } catch (groqErr: any) {
+      console.warn('[Engine Fallback] Groq falló, pasando a Gemini Multi-Key Harness:', groqErr?.message || groqErr);
+    }
+  }
+
+  // 2. Second priority: Gemini Multi-Key Harness
+  const apiKeys = getApiKeys();
+
+  if (apiKeys.length === 0 && !groqKey) {
+    const fallbackResult = generateRealisticMockAnalysis(fileName, agentName, queue, transcriptText);
+    return res.status(200).json({
+      success: true,
+      data: fallbackResult,
+      meta: {
+        engine: 'Intelligent Heuristics (Configure GROQ_API_KEY or GEMINI_API_KEY for live AI)',
+        modelUsed: 'local-qa-engine',
+        retries: 0
+      }
+    });
+  }
 
   // Resilience Cascade loop
   const models = requestedModelCascade && requestedModelCascade.length > 0 
