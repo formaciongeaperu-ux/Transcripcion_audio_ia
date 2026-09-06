@@ -4,7 +4,7 @@
  */
 
 // G.711 A-law lookup table to 16-bit linear PCM
-const ALAW_TABLE = new Int16Array(256);
+export const ALAW_TABLE = new Int16Array(256);
 for (let i = 0; i < 256; i++) {
   let val = i ^ 0x55;
   let t = (val & 0x0f) << 4;
@@ -24,7 +24,7 @@ for (let i = 0; i < 256; i++) {
 }
 
 // G.711 µ-law lookup table to 16-bit linear PCM
-const MULAW_TABLE = new Int16Array(256);
+export const MULAW_TABLE = new Int16Array(256);
 for (let i = 0; i < 256; i++) {
   let val = ~i;
   const sign = val & 0x80;
