@@ -1,0 +1,7 @@
+{
+  "name": "Speech Analytics & Contact Center QA",
+  "description": "Plataforma Google Cloud de Speech Analytics, auditoría de llamadas, predicción de NPS Claro, detección de quiebres y feedback con Inteligencia Artificial.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
