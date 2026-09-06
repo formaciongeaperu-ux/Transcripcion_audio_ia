@@ -368,7 +368,7 @@ AUDITORÍA DE CALIDAD Y SPEECH ANALYTICS (CLARO CHILE):
 
         const generatePromise = ai.models.generateContent({
           model,
-          contents: { parts },
+          contents: parts,
           config: {
             temperature: 0.1,
             maxOutputTokens: 16384,
