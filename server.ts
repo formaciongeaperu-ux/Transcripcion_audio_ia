@@ -390,36 +390,63 @@ Responde ÚNICAMENTE con un JSON válido que contenga la estructura exacta solic
   "segmentos": []
 }`;
 
-  const chatRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${groqKey}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: 'llama-3.3-70b-versatile',
-      messages: [
-        {
-          role: 'system',
-          content: 'Eres el auditor principal de Calidad y Speech Analytics para Claro Chile. Devuelve tu análisis exclusivamente en formato JSON estructurado.'
-        },
-        {
-          role: 'user',
-          content: auditPrompt
-        }
-      ],
-      response_format: { type: 'json_object' },
-      temperature: 0.1
-    })
-  });
+  const candidateGroqModels = [
+    'llama-3.1-8b-instant',
+    'llama-3.1-70b-versatile',
+    'llama3-70b-8192',
+    'llama3-8b-8192',
+    'mixtral-8x7b-32768',
+    'gemma2-9b-it',
+    'llama-3.3-70b-versatile',
+    'llama-3.3-70b-specdec'
+  ];
 
-  if (!chatRes.ok) {
-    const errText = await chatRes.text();
-    throw new Error(`Groq LLaMA error (${chatRes.status}): ${errText}`);
+  let rawJson = '';
+  let modelUsed = '';
+
+  for (const modelCandidate of candidateGroqModels) {
+    try {
+      const chatRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${groqKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: modelCandidate,
+          messages: [
+            {
+              role: 'system',
+              content: 'Eres el auditor principal de Calidad y Speech Analytics para Claro Chile. Devuelve tu análisis exclusivamente en formato JSON estructurado.'
+            },
+            {
+              role: 'user',
+              content: auditPrompt
+            }
+          ],
+          response_format: { type: 'json_object' },
+          temperature: 0.1
+        })
+      });
+
+      if (chatRes.ok) {
+        const chatData = (await chatRes.json()) as any;
+        rawJson = chatData.choices?.[0]?.message?.content || '{}';
+        modelUsed = modelCandidate;
+        break;
+      } else {
+        const errTxt = await chatRes.text();
+        console.warn(`[Groq Model Candidate] ${modelCandidate} failed (${chatRes.status}): ${errTxt}`);
+      }
+    } catch (e: any) {
+      console.warn(`[Groq Model Candidate] Error with ${modelCandidate}:`, e?.message || e);
+    }
   }
 
-  const chatData = (await chatRes.json()) as any;
-  const rawJson = chatData.choices?.[0]?.message?.content || '{}';
+  if (!rawJson) {
+    throw new Error('Ningún modelo de chat de Groq respondió con éxito');
+  }
+
   const parsed = JSON.parse(rawJson);
 
   const finalSegments = (parsed.segmentos && parsed.segmentos.length > 0)
@@ -573,7 +600,7 @@ AUDITORÍA DE CALIDAD Y SPEECH ANALYTICS (CLARO CHILE):
   // Resilience Cascade loop
   const models = requestedModelCascade && requestedModelCascade.length > 0 
     ? requestedModelCascade 
-    : ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+    : ['gemini-2.0-flash', 'gemini-1.5-flash-8b', 'gemini-1.5-pro', 'gemini-2.0-flash-exp', 'gemini-2.5-flash'];
 
   let lastErrorDetail = '';
   let retryCount = 0;
