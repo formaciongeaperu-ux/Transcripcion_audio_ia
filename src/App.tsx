@@ -9,6 +9,7 @@ import { DeferredQueueModal } from './components/DeferredQueueModal';
 import { SheetsModal } from './components/SheetsModal';
 import { CallRecord, UploadItem } from './types';
 import { exportCallsToExcel, exportCallsToCSV, exportSingleCallReport } from './utils/exportUtils';
+import { downsampleTo16kHzMonoWav } from './utils/audioOptimizer';
 import { SpreadsheetInfo, appendCallsToSpreadsheet } from './services/sheetsService';
 import { getAccessToken } from './services/googleAuth';
 
@@ -151,26 +152,50 @@ export default function App() {
   const handleRetryItem = async (item: UploadItem) => {
     setIsRetryingQueue(true);
     try {
+      let base64 = '';
+      if (item.optimizedBlob) {
+        const reader = new FileReader();
+        base64 = await new Promise((res) => {
+          reader.onloadend = () => res((reader.result as string).split(',')[1] || '');
+          reader.readAsDataURL(item.optimizedBlob!);
+        });
+      } else {
+        const opt = await downsampleTo16kHzMonoWav(item.file);
+        base64 = opt.base64;
+      }
+
       const response = await fetch('/api/analyze-call', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          audioBase64: base64,
+          mimeType: 'audio/wav',
           fileName: item.file.name,
           agentName: 'Asesor Claro',
           queue: 'Exclusivo Postpago Chile',
         }),
       });
-      const resData = await response.json();
-      if (resData.success && resData.data) {
+
+      const resText = await response.text();
+      let resData: any = {};
+      try {
+        resData = JSON.parse(resText);
+      } catch {
+        resData = { message: `Error del servidor (${response.status}): ${resText.slice(0, 100)}` };
+      }
+
+      if (response.ok && resData.success && resData.data) {
         const newCall = resData.data as CallRecord;
         newCall.audio_url = URL.createObjectURL(item.file);
         newCall.audioFile = item.file;
         newCall.file_name = item.file.name;
         setCalls((prev) => [newCall, ...prev]);
         handleRemoveDeferredItem(item.id);
+      } else {
+        alert(resData.message || 'No se pudo reintentar el análisis. Verifica tus API Keys de Gemini.');
       }
-    } catch {
-      // error handled
+    } catch (err: any) {
+      alert(`Error al reintentar: ${err?.message || err}`);
     } finally {
       setIsRetryingQueue(false);
     }
