@@ -15,30 +15,62 @@ const PORT = 3000;
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Lazy GoogleGenAI initialization
-let aiClient: GoogleGenAI | null = null;
-function getGenAI(): GoogleGenAI | null {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) return null;
-  if (!aiClient) {
-    aiClient = new GoogleGenAI({
-      apiKey: key,
+// Multi-Key API Harness Manager
+function getApiKeys(): string[] {
+  const keys: string[] = [];
+
+  // 1. Check GEMINI_API_KEYS (comma-separated list)
+  if (process.env.GEMINI_API_KEYS) {
+    process.env.GEMINI_API_KEYS.split(',')
+      .map(k => k.trim())
+      .filter(k => k.length > 0)
+      .forEach(k => { if (!keys.includes(k)) keys.push(k); });
+  }
+
+  // 2. Check standard GEMINI_API_KEY (can also be comma-separated)
+  if (process.env.GEMINI_API_KEY) {
+    process.env.GEMINI_API_KEY.split(',')
+      .map(k => k.trim())
+      .filter(k => k.length > 0)
+      .forEach(k => { if (!keys.includes(k)) keys.push(k); });
+  }
+
+  // 3. Check numbered keys (GEMINI_API_KEY_1, GEMINI_API_KEY_2, ... up to 10)
+  for (let i = 1; i <= 10; i++) {
+    const k = process.env[`GEMINI_API_KEY_${i}`];
+    if (k && k.trim()) {
+      const clean = k.trim();
+      if (!keys.includes(clean)) keys.push(clean);
+    }
+  }
+
+  return keys;
+}
+
+const clientCache = new Map<string, GoogleGenAI>();
+function getGenAIClient(apiKey: string): GoogleGenAI {
+  let client = clientCache.get(apiKey);
+  if (!client) {
+    client = new GoogleGenAI({
+      apiKey,
       httpOptions: {
         headers: {
           'User-Agent': 'aistudio-build',
         },
       },
     });
+    clientCache.set(apiKey, client);
   }
-  return aiClient;
+  return client;
 }
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
-  const hasKey = !!process.env.GEMINI_API_KEY;
+  const keys = getApiKeys();
   res.json({
     status: 'ok',
-    geminiKeyConfigured: hasKey,
+    geminiKeyConfigured: keys.length > 0,
+    totalApiKeysInHarness: keys.length,
     supportedModels: ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'],
     serverTime: new Date().toISOString(),
   });
@@ -258,10 +290,10 @@ app.post('/api/analyze-call', async (req, res) => {
     requestedModelCascade = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
   } = req.body;
 
-  const ai = getGenAI();
+  const apiKeys = getApiKeys();
 
   // If no Gemini API key, generate realistic intelligent QA analysis directly
-  if (!ai) {
+  if (apiKeys.length === 0) {
     const fallbackResult = generateRealisticMockAnalysis(fileName, agentName, queue, transcriptText);
     return res.json({
       success: true,
@@ -341,145 +373,145 @@ AUDITORÍA DE CALIDAD Y SPEECH ANALYTICS (CLARO CHILE):
     transcodedAudioBase64 = await transcodeToCanonicalWav(audioBase64);
   }
 
+  // Iterate over models in cascade
   for (const model of models) {
-    // Up to 3 retries per model with exponential backoff for 429
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        const parts: Array<Record<string, unknown>> = [];
-        
-        if (transcodedAudioBase64) {
-          parts.push({
-            inlineData: {
-              data: transcodedAudioBase64,
-              mimeType: 'audio/wav',
+    // Iterate over API keys in harness pool
+    for (let keyIdx = 0; keyIdx < apiKeys.length; keyIdx++) {
+      const activeKey = apiKeys[keyIdx];
+      const ai = getGenAIClient(activeKey);
+
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          const parts: Array<Record<string, unknown>> = [];
+          
+          if (transcodedAudioBase64) {
+            parts.push({
+              inlineData: {
+                data: transcodedAudioBase64,
+                mimeType: 'audio/wav',
+              }
+            });
+          }
+          
+          if (transcriptText) {
+            parts.push({ text: `Transcripción o contexto inicial de la llamada:\n${transcriptText}` });
+          }
+
+          parts.push({ text: prompt });
+
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Model timeout after 120s')), 120000)
+          );
+
+          const generatePromise = ai.models.generateContent({
+            model,
+            contents: parts,
+            config: {
+              temperature: 0.1,
+              maxOutputTokens: 16384,
+              responseMimeType: 'application/json',
+              responseSchema: callAnalysisSchema,
             }
           });
-        }
-        
-        if (transcriptText) {
-          parts.push({ text: `Transcripción o contexto inicial de la llamada:\n${transcriptText}` });
-        }
 
-        parts.push({ text: prompt });
+          const response = (await Promise.race([generatePromise, timeoutPromise])) as { text?: string };
 
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Model timeout after 120s')), 120000)
-        );
+          const rawText = response.text?.trim() || '{}';
+          const parsed = JSON.parse(rawText);
 
-        const generatePromise = ai.models.generateContent({
-          model,
-          contents: parts,
-          config: {
-            temperature: 0.1,
-            maxOutputTokens: 16384,
-            responseMimeType: 'application/json',
-            responseSchema: callAnalysisSchema,
-          }
-        });
+          // Normalize QA score global
+          const crits = parsed.evaluacion_criterios;
+          const avgScore = crits ? Math.round(
+            (crits.amabilidad_empatia.nota +
+             crits.seguridad_expresarse.nota +
+             crits.claridad_informacion.nota +
+             crits.tiempos_espera_hold.nota +
+             crits.eficiencia_tmo.nota) / 5
+          ) : 70;
 
-        const response = (await Promise.race([generatePromise, timeoutPromise])) as { text?: string };
+          const rawSegs = parsed.segmentos || parsed.transcripcion?.segmentos || [];
+          const normalizedSegmentos = rawSegs.map((seg: any, idx: number) => ({
+            id: seg.id || `seg-${idx + 1}`,
+            hablante: seg.hablante === 'cliente' ? 'cliente' : 'agente',
+            inicio: typeof seg.inicio === 'number' ? seg.inicio : 0,
+            fin: typeof seg.fin === 'number' ? seg.fin : 5,
+            texto: seg.texto || '',
+            sentimientoScore: typeof seg.sentimientoScore === 'number' ? seg.sentimientoScore : 0
+          }));
 
-        const rawText = response.text?.trim() || '{}';
-        const parsed = JSON.parse(rawText);
+          const detectedAgent = parsed.agente_nombre_detectado && parsed.agente_nombre_detectado !== 'Asesor' 
+            ? parsed.agente_nombre_detectado 
+            : agentName;
+          const detectedCustomer = parsed.cliente_nombre_detectado && parsed.cliente_nombre_detectado !== 'Cliente'
+            ? parsed.cliente_nombre_detectado
+            : 'Cliente Claro';
 
-        // Normalize QA score global
-        const crits = parsed.evaluacion_criterios;
-        const avgScore = crits ? Math.round(
-          (crits.amabilidad_empatia.nota +
-           crits.seguridad_expresarse.nota +
-           crits.claridad_informacion.nota +
-           crits.tiempos_espera_hold.nota +
-           crits.eficiencia_tmo.nota) / 5
-        ) : 70;
+          const completeRecord = {
+            id: `call-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+            codigo_llamada: `REC-2026-CHILE-${Math.floor(1000 + Math.random() * 9000)}`,
+            fecha_hora: new Date().toISOString().replace('T', ' ').substring(0, 16),
+            agente_nombre: detectedAgent,
+            agente_id: `AG-${Math.floor(7000 + Math.random() * 3000)}`,
+            cliente_nombre: detectedCustomer,
+            cliente_telefono: '+56 9 ' + Math.floor(60000000 + Math.random() * 39999999),
+            cola_atencion: queue,
+            duracion_total: formatSeconds(parsed.silencio_analisis?.duracion_total_segundos || 420),
+            duracion_segundos: parsed.silencio_analisis?.duracion_total_segundos || 420,
+            qa_score_global: avgScore,
+            sentimiento_label: parsed.sentimiento_score > 0.2 ? 'Positivo' : parsed.sentimiento_score < -0.2 ? 'Negativo' : 'Neutro',
+            modelo_procesado: model,
+            ...parsed,
+            segmentos: normalizedSegmentos,
+            transcripcion: {
+              segmentos: normalizedSegmentos
+            }
+          };
 
-        const rawSegs = parsed.segmentos || parsed.transcripcion?.segmentos || [];
-        const normalizedSegmentos = rawSegs.map((seg: any, idx: number) => ({
-          id: seg.id || `seg-${idx + 1}`,
-          hablante: seg.hablante === 'cliente' ? 'cliente' : 'agente',
-          inicio: typeof seg.inicio === 'number' ? seg.inicio : 0,
-          fin: typeof seg.fin === 'number' ? seg.fin : 5,
-          texto: seg.texto || '',
-          sentimientoScore: typeof seg.sentimientoScore === 'number' ? seg.sentimientoScore : 0
-        }));
-
-        const detectedAgent = parsed.agente_nombre_detectado && parsed.agente_nombre_detectado !== 'Asesor' 
-          ? parsed.agente_nombre_detectado 
-          : agentName;
-        const detectedCustomer = parsed.cliente_nombre_detectado && parsed.cliente_nombre_detectado !== 'Cliente'
-          ? parsed.cliente_nombre_detectado
-          : 'Cliente Claro';
-
-        const completeRecord = {
-          id: `call-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
-          codigo_llamada: `REC-2026-CHILE-${Math.floor(1000 + Math.random() * 9000)}`,
-          fecha_hora: new Date().toISOString().replace('T', ' ').substring(0, 16),
-          agente_nombre: detectedAgent,
-          agente_id: `AG-${Math.floor(7000 + Math.random() * 3000)}`,
-          cliente_nombre: detectedCustomer,
-          cliente_telefono: '+56 9 ' + Math.floor(60000000 + Math.random() * 39999999),
-          cola_atencion: queue,
-          duracion_total: formatSeconds(parsed.silencio_analisis?.duracion_total_segundos || 420),
-          duracion_segundos: parsed.silencio_analisis?.duracion_total_segundos || 420,
-          qa_score_global: avgScore,
-          sentimiento_label: parsed.sentimiento_score > 0.2 ? 'Positivo' : parsed.sentimiento_score < -0.2 ? 'Negativo' : 'Neutro',
-          modelo_procesado: model,
-          ...parsed,
-          segmentos: normalizedSegmentos,
-          transcripcion: {
-            segmentos: normalizedSegmentos
-          }
-        };
-
-        return res.json({
-          success: true,
-          data: completeRecord,
-          meta: {
-            modelUsed: model,
-            attempts: attempt,
-            totalRetries: retryCount
-          }
-        });
-
-      } catch (err: unknown) {
-        const error = err as { status?: number; message?: string };
-        const status = error.status || 500;
-        const errMsg = error.message || String(err);
-        lastErrorDetail = errMsg;
-
-        // Check for 401/403 Invalid API key
-        if (status === 401 || status === 403 || errMsg.includes('API_KEY_INVALID') || errMsg.includes('unregistered project')) {
-          return res.status(401).json({
-            success: false,
-            errorType: 'API_KEY_INVALID',
-            message: 'La clave de Gemini API es inválida o no tiene permisos. Por favor revísala en Google AI Studio.',
-            setupUrl: 'https://aistudio.google.com/app/apikey'
+          return res.json({
+            success: true,
+            data: completeRecord,
+            meta: {
+              modelUsed: model,
+              apiKeyHarnessSlot: keyIdx + 1,
+              totalKeysConfigured: apiKeys.length,
+              attempts: attempt,
+              totalRetries: retryCount
+            }
           });
-        }
 
-        // Check for 429 Too Many Requests
-        const is429 = status === 429 || errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('Too Many Requests');
-        
-        if (is429) {
-          retryCount++;
-          // Exponential backoff: 2s -> 4s -> 8s with jitter
-          const backoffTime = Math.pow(2, attempt) * 1000;
-          console.warn(`[429 Quota Exceeded] Modelo ${model}, intento ${attempt}/3. Esperando ${backoffTime}ms...`);
-          await sleep(backoffTime);
-          continue; // retry same model
-        } else {
-          // Other error: break to next model in cascade
-          console.warn(`[Model Error] ${model}: ${errMsg}. Pasando al siguiente modelo en cascada...`);
-          break;
+        } catch (err: unknown) {
+          const error = err as { status?: number; message?: string };
+          const status = error.status || 500;
+          const errMsg = error.message || String(err);
+          lastErrorDetail = errMsg;
+
+          // Check for 401/403 Invalid API key
+          if (status === 401 || status === 403 || errMsg.includes('API_KEY_INVALID') || errMsg.includes('unregistered project')) {
+            console.warn(`[API Key Harness] Key #${keyIdx + 1} inválida (${errMsg}). Rotando a la siguiente API key del arnés...`);
+            break; // Try next API key
+          }
+
+          // Check for 429 Too Many Requests
+          const is429 = status === 429 || errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('Too Many Requests');
+          
+          if (is429) {
+            retryCount++;
+            console.warn(`[API Key Harness] Key #${keyIdx + 1} agotó cuota 429 para ${model}. Rotando al instante a siguiente Key del arnés...`);
+            break; // Immediately try next API key in harness
+          } else {
+            console.warn(`[Model Error] ${model} (Key #${keyIdx + 1}): ${errMsg}`);
+            break; // Try next key / next model
+          }
         }
       }
     }
   }
 
-  // If all models in cascade exhausted retries:
+  // If all models and API keys in cascade exhausted retries:
   res.status(429).json({
     success: false,
     errorType: 'QUOTA_EXHAUSTED_ALL_MODELS',
-    message: 'Se agotó la cuota de peticiones en todos los modelos en cascada (HTTP 429). El audio puede ser enviado a la cola diferida de reintento automático.',
+    message: 'Se agotó la cuota de peticiones en todos los modelos y claves API del arnés. El audio se resguarda en la cola diferida.',
     lastError: lastErrorDetail,
     allowDeferredQueue: true
   });
