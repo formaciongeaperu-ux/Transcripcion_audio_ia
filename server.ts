@@ -5,7 +5,6 @@ import os from 'os';
 import { execFile } from 'child_process';
 import dotenv from 'dotenv';
 import { GoogleGenAI, Type } from '@google/genai';
-import { createServer as createViteServer } from 'vite';
 
 dotenv.config();
 
@@ -40,7 +39,7 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     geminiKeyConfigured: hasKey,
-    supportedModels: ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-3.1-pro-preview'],
+    supportedModels: ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'],
     serverTime: new Date().toISOString(),
   });
 });
@@ -256,7 +255,7 @@ app.post('/api/analyze-call', async (req, res) => {
     transcriptText,
     agentName = 'Asesor Claro',
     queue = 'Exclusivo Postpago Chile',
-    requestedModelCascade = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-3.1-pro-preview']
+    requestedModelCascade = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
   } = req.body;
 
   const ai = getGenAI();
@@ -331,7 +330,7 @@ AUDITORÍA DE CALIDAD Y SPEECH ANALYTICS (CLARO CHILE):
   // Resilience Cascade loop
   const models = requestedModelCascade && requestedModelCascade.length > 0 
     ? requestedModelCascade 
-    : ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-3.1-pro-preview'];
+    : ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
 
   let lastErrorDetail = '';
   let retryCount = 0;
@@ -667,9 +666,9 @@ function generateRealisticMockAnalysis(fileName: string, agentName: string, queu
 }
 
 // Start server with Vite middleware in dev or static serving in prod
-// Start server with Vite middleware in dev or static serving in prod
 async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
+  if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',

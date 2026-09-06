@@ -148,7 +148,19 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           }),
         });
 
-        const resData = await response.json();
+        const resText = await response.text();
+        let resData: any = {};
+        try {
+          resData = JSON.parse(resText);
+        } catch {
+          throw new Error(
+            response.status === 413
+              ? 'El audio excede el límite de carga de Vercel (máx 4.5MB). Usa optimización de audio.'
+              : response.status === 504
+              ? 'Tiempo de espera agotado al transcribir. Intenta con un audio más corto.'
+              : `Error del servidor (${response.status}): ${resText.slice(0, 100)}`
+          );
+        }
 
         if (response.ok && resData.success && resData.data) {
           const callData = resData.data as CallRecord;
