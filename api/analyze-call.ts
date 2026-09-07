@@ -413,7 +413,7 @@ export default async function handler(req: any, res: any) {
     transcriptText,
     agentName = 'Asesor Claro',
     queue = 'Exclusivo Postpago Chile',
-    requestedModelCascade = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
+    requestedModelCascade = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-flash-latest']
   } = req.body || {};
 
   const prompt = `Eres un auditor experto en Speech Analytics y Aseguramiento de la Calidad (QA) para Contact Centers de Claro en Chile.
@@ -463,7 +463,7 @@ AUDITORÍA DE CALIDAD Y SPEECH ANALYTICS (CLARO CHILE):
   const apiKeys = getApiKeys();
   const models = requestedModelCascade && requestedModelCascade.length > 0 
     ? requestedModelCascade 
-    : ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+    : ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-flash-latest'];
 
   let lastErrorDetail = '';
   let retryCount = 0;

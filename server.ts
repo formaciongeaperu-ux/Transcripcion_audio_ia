@@ -493,7 +493,7 @@ app.post('/api/analyze-call', async (req, res) => {
     transcriptText,
     agentName = 'Asesor Claro',
     queue = 'Exclusivo Postpago Chile',
-    requestedModelCascade = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
+    requestedModelCascade = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-flash-latest']
   } = req.body;
 
   const prompt = `Eres un auditor experto en Speech Analytics y Aseguramiento de la Calidad (QA) para Contact Centers de Claro en Chile.
@@ -518,6 +518,15 @@ CONTEXTO CULTURAL Y OPERATIVO HÍBRIDO (CHILENO - PERUANO):
   * "Bajar el plan / Portabilidad / Cortar la línea" = Gestiones comerciales.
   * "Banda ancha / Factibilidad / ONT / Router" = Términos técnicos.
 
+ESTRUCTURA DE SEGMENTOS Y DIÁLOGOS OBLIGATORIA:
+- Debes segmentar la llamada cronológicamente asignando cada intervención a:
+  * 'hablante': "agente" o "cliente"
+  * 'inicio': segundo exacto en que comienza a hablar (timestamp en segundos, ej: 0, 12, 45)
+  * 'fin': segundo exacto en que termina de hablar
+  * 'texto': transcripción literal de lo que dijo en ese turno (palabra por palabra)
+  * 'sentimientoScore': valor entre -1.0 (muy molesto/frustrado) y 1.0 (muy satisfecho/amable)
+- No resumas la conversación en 3 o 4 líneas. Transcribe todos y cada uno de los turnos de diálogo que ocurran en el audio real.
+
 DETECCIÓN DE ALERTAS CRÍTICAS:
 - Registra en 'alertas' si el cliente menciona:
   * "SERNAC" (Servicio Nacional del Consumidor).
@@ -532,16 +541,6 @@ VALIDACIÓN DE GUION INSTITUCIONAL CHILENO:
 - Entrega de número de orden / reclamo / ticket de atención (obligatorio por normativa SUBTEL) -> cumplimiento_guion.entrega_ticket_subtel
 - Despedida cordial -> cumplimiento_guion.despedida_cordial
 
-TRANSCRIPCIÓN EXHAUSTIVA DE PRINCIPIO A FIN EN 'segmentos':
-- Provee secuencialmente TODOS los turnos reales de habla desde el segundo 0 hasta el final de la llamada.
-- Cada segmento debe tener:
-  * 'hablante': 'agente' | 'cliente'
-  * 'inicio': segundo exacto en que empieza a hablar
-  * 'fin': segundo exacto en que termina de hablar
-  * 'texto': transcripción literal de lo que dijo en ese turno (palabra por palabra)
-  * 'sentimientoScore': valor entre -1.0 (muy molesto/frustrado) y 1.0 (muy satisfecho/amable)
-- No resumas la conversación en 3 o 4 líneas. Transcribe todos y cada uno de los turnos de diálogo que ocurran en el audio real.
-
 AUDITORÍA DE CALIDAD Y SPEECH ANALYTICS (CLARO CHILE):
 1. Evalúa los 5 criterios de calidad de 0 a 100: Amabilidad/Empatía, Seguridad al expresarse, Claridad de información, Tiempos de espera (hold), y Eficiencia TMO con diagnósticos descriptivos.
 2. Identifica los QUIEBRES de los asesores a nivel de atención (momentos críticos donde el asesor fue cortante, condescendiente, interrumpió al cliente, desinformó, o dejó silencios sin cortesía).
@@ -553,7 +552,7 @@ AUDITORÍA DE CALIDAD Y SPEECH ANALYTICS (CLARO CHILE):
   const apiKeys = getApiKeys();
   const models = requestedModelCascade && requestedModelCascade.length > 0 
     ? requestedModelCascade 
-    : ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+    : ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-flash-latest'];
 
   let lastErrorDetail = '';
   let retryCount = 0;
