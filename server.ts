@@ -696,6 +696,7 @@ AUDITORÍA DE CALIDAD Y SPEECH ANALYTICS (CLARO CHILE):
       }
     }
   }
+}
 
   // 2. Secondary fallback: Groq (only if Gemini was not available or failed)
   const groqKey = process.env.GROQ_API_KEY;
