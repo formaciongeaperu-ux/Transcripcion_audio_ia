@@ -162,13 +162,28 @@ export async function optimizeAudioInBrowser(
     if (meta.isWav) {
       const directDecoded = decodeWavDirectly(arrayBuffer, meta);
       if (directDecoded && directDecoded.samples.length > 0) {
+        const durationSeconds = directDecoded.samples.length / directDecoded.sourceSampleRate;
+        
+        // Adaptive parameters to strictly keep payload under 2.8 MB (Base64 < 3.8 MB) for Vercel 4.5MB limit
+        let effectiveRate = targetSampleRate;
+        let bits: 8 | 16 = 16;
+        if (durationSeconds > 200) {
+          effectiveRate = 8000;
+          bits = 8;
+        } else if (durationSeconds > 80) {
+          effectiveRate = 8000;
+          bits = 16;
+        } else {
+          effectiveRate = 16000;
+          bits = 16;
+        }
+
         const resampled = resampleFloat32Mono(
           directDecoded.samples,
           directDecoded.sourceSampleRate,
-          targetSampleRate
+          effectiveRate
         );
-        const durationSeconds = directDecoded.samples.length / directDecoded.sourceSampleRate;
-        const wavBlob = encodeWAV(resampled, targetSampleRate);
+        const wavBlob = encodeWAV(resampled, effectiveRate, bits);
         const optimizedSize = wavBlob.size;
         const savingsPercentage = Math.max(0, Math.round(((originalSize - optimizedSize) / originalSize) * 100));
         const base64Data = await blobToBase64(wavBlob);
@@ -178,7 +193,7 @@ export async function optimizeAudioInBrowser(
           optimizedSize,
           savingsPercentage,
           durationSeconds,
-          sampleRate: targetSampleRate,
+          sampleRate: effectiveRate,
           channels: 1,
           wavBlob,
           base64Data
@@ -201,10 +216,23 @@ export async function optimizeAudioInBrowser(
 
       if (audioBuffer) {
         const durationSeconds = audioBuffer.duration;
+        let effectiveRate = targetSampleRate;
+        let bits: 8 | 16 = 16;
+        if (durationSeconds > 200) {
+          effectiveRate = 8000;
+          bits = 8;
+        } else if (durationSeconds > 80) {
+          effectiveRate = 8000;
+          bits = 16;
+        } else {
+          effectiveRate = 16000;
+          bits = 16;
+        }
+
         const offlineCtx = new OfflineAudioContext(
           1, // mono
-          Math.max(1, Math.ceil(durationSeconds * targetSampleRate)),
-          targetSampleRate
+          Math.max(1, Math.ceil(durationSeconds * effectiveRate)),
+          effectiveRate
         );
 
         const source = offlineCtx.createBufferSource();
@@ -215,7 +243,7 @@ export async function optimizeAudioInBrowser(
         const renderedBuffer = await offlineCtx.startRendering();
         const monoChannelData = renderedBuffer.getChannelData(0);
 
-        const wavBlob = encodeWAV(monoChannelData, targetSampleRate);
+        const wavBlob = encodeWAV(monoChannelData, effectiveRate, bits);
         const optimizedSize = wavBlob.size;
         const savingsPercentage = Math.max(0, Math.round(((originalSize - optimizedSize) / originalSize) * 100));
         const base64Data = await blobToBase64(wavBlob);
@@ -225,7 +253,7 @@ export async function optimizeAudioInBrowser(
           optimizedSize,
           savingsPercentage,
           durationSeconds,
-          sampleRate: targetSampleRate,
+          sampleRate: effectiveRate,
           channels: 1,
           wavBlob,
           base64Data
@@ -262,14 +290,15 @@ export async function optimizeAudioInBrowser(
   }
 }
 
-function encodeWAV(samples: Float32Array, sampleRate: number): Blob {
-  const buffer = new ArrayBuffer(44 + samples.length * 2);
+function encodeWAV(samples: Float32Array, sampleRate: number, bitsPerSample: number = 16): Blob {
+  const bytesPerSample = bitsPerSample === 8 ? 1 : 2;
+  const buffer = new ArrayBuffer(44 + samples.length * bytesPerSample);
   const view = new DataView(buffer);
 
   /* RIFF identifier */
   writeString(view, 0, 'RIFF');
   /* file length */
-  view.setUint32(4, 36 + samples.length * 2, true);
+  view.setUint32(4, 36 + samples.length * bytesPerSample, true);
   /* RIFF type */
   writeString(view, 8, 'WAVE');
   /* format chunk identifier */
@@ -283,21 +312,28 @@ function encodeWAV(samples: Float32Array, sampleRate: number): Blob {
   /* sample rate */
   view.setUint32(24, sampleRate, true);
   /* byte rate (sample rate * block align) */
-  view.setUint32(28, sampleRate * 2, true);
+  view.setUint32(28, sampleRate * bytesPerSample, true);
   /* block align (channel count * bytes per sample) */
-  view.setUint16(32, 2, true);
+  view.setUint16(32, bytesPerSample, true);
   /* bits per sample */
-  view.setUint16(34, 16, true);
+  view.setUint16(34, bitsPerSample, true);
   /* data chunk identifier */
   writeString(view, 36, 'data');
   /* data chunk length */
-  view.setUint32(40, samples.length * 2, true);
+  view.setUint32(40, samples.length * bytesPerSample, true);
 
-  // Write PCM samples (16-bit clamp)
-  let offset = 44;
-  for (let i = 0; i < samples.length; i++, offset += 2) {
-    const s = Math.max(-1, Math.min(1, samples[i]));
-    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  if (bitsPerSample === 8) {
+    let offset = 44;
+    for (let i = 0; i < samples.length; i++, offset++) {
+      const s = Math.max(-1, Math.min(1, samples[i]));
+      view.setUint8(offset, Math.floor((s + 1) * 127.5));
+    }
+  } else {
+    let offset = 44;
+    for (let i = 0; i < samples.length; i++, offset += 2) {
+      const s = Math.max(-1, Math.min(1, samples[i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    }
   }
 
   return new Blob([view], { type: 'audio/wav' });

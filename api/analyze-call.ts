@@ -620,12 +620,21 @@ AUDITORÍA DE CALIDAD Y SPEECH ANALYTICS (CLARO CHILE):
     }
   }
 
-  return res.status(429).json({
+  const isRateLimit = lastErrorDetail.includes('429') || 
+                      lastErrorDetail.includes('RESOURCE_EXHAUSTED') || 
+                      lastErrorDetail.toLowerCase().includes('quota') ||
+                      lastErrorDetail.toLowerCase().includes('rate limit');
+
+  const httpStatus = isRateLimit ? 429 : 500;
+
+  return res.status(httpStatus).json({
     success: false,
-    errorType: 'QUOTA_EXHAUSTED_ALL_MODELS',
-    message: 'Se agotó la cuota de peticiones en todos los motores de IA configurados.',
+    errorType: isRateLimit ? 'QUOTA_EXHAUSTED_ALL_MODELS' : 'ANALYSIS_ERROR',
+    message: isRateLimit
+      ? 'Se superó el límite de peticiones por minuto en Gemini Pay-As-You-Go. La llamada fue derivada a la cola diferida.'
+      : `Error al procesar la llamada con Gemini (${models[0]}): ${lastErrorDetail || 'Error desconocido'}`,
     lastError: lastErrorDetail,
-    allowDeferredQueue: true
+    allowDeferredQueue: isRateLimit
   });
 }
 
