@@ -459,11 +459,144 @@ AUDITORÍA DE CALIDAD Y SPEECH ANALYTICS (CLARO CHILE):
 4. Tiempo de Silencio Conversacional con el agente.
 5. Plan de coaching y feedback accionable para el asesor.`;
 
-  // 1. First priority: Groq Ultra-Fast Whisper + LLaMA 3.3 Engine
+  // 1. First & Primary Priority: Google Gemini Pay-As-You-Go (Direct official key)
+  const apiKeys = getApiKeys();
+  const models = requestedModelCascade && requestedModelCascade.length > 0 
+    ? requestedModelCascade 
+    : ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+
+  let lastErrorDetail = '';
+  let retryCount = 0;
+
+  if (apiKeys.length > 0) {
+    for (const model of models) {
+      for (let keyIdx = 0; keyIdx < apiKeys.length; keyIdx++) {
+        const activeKey = apiKeys[keyIdx];
+        const ai = getGenAIClient(activeKey);
+
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          try {
+            const parts: Array<Record<string, unknown>> = [];
+            
+            if (audioBase64) {
+              parts.push({
+                inlineData: {
+                  data: audioBase64,
+                  mimeType: mimeType || 'audio/wav',
+                }
+              });
+            }
+            
+            if (transcriptText) {
+              parts.push({ text: `Transcripción o contexto inicial de la llamada:\n${transcriptText}` });
+            }
+
+            parts.push({ text: prompt });
+
+            const timeoutPromise = new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Model timeout after 60s')), 60000)
+            );
+
+            const generatePromise = ai.models.generateContent({
+              model,
+              contents: parts,
+              config: {
+                temperature: 0.1,
+                maxOutputTokens: 16384,
+                responseMimeType: 'application/json',
+                responseSchema: callAnalysisSchema,
+              }
+            });
+
+            const response = (await Promise.race([generatePromise, timeoutPromise])) as { text?: string };
+
+            const rawText = response.text?.trim() || '{}';
+            const parsed = JSON.parse(rawText);
+
+            const crits = parsed.evaluacion_criterios;
+            const avgScore = crits ? Math.round(
+              (crits.amabilidad_empatia.nota +
+               crits.seguridad_expresarse.nota +
+               crits.claridad_informacion.nota +
+               crits.tiempos_espera_hold.nota +
+               crits.eficiencia_tmo.nota) / 5
+            ) : 70;
+
+            const rawSegs = parsed.segmentos || parsed.transcripcion?.segmentos || [];
+            const normalizedSegmentos = rawSegs.map((seg: any, idx: number) => ({
+              id: seg.id || `seg-${idx + 1}`,
+              hablante: seg.hablante === 'cliente' ? 'cliente' : 'agente',
+              inicio: typeof seg.inicio === 'number' ? seg.inicio : 0,
+              fin: typeof seg.fin === 'number' ? seg.fin : 5,
+              texto: seg.texto || '',
+              sentimientoScore: typeof seg.sentimientoScore === 'number' ? seg.sentimientoScore : 0
+            }));
+
+            const detectedAgent = parsed.agente_nombre_detectado && parsed.agente_nombre_detectado !== 'Asesor' 
+              ? parsed.agente_nombre_detectado 
+              : agentName;
+            const detectedCustomer = parsed.cliente_nombre_detectado && parsed.cliente_nombre_detectado !== 'Cliente'
+              ? parsed.cliente_nombre_detectado
+              : 'Cliente Claro';
+
+            const completeRecord = {
+              id: `call-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+              codigo_llamada: `REC-2026-CHILE-${Math.floor(1000 + Math.random() * 9000)}`,
+              fecha_hora: new Date().toISOString().replace('T', ' ').substring(0, 16),
+              agente_nombre: detectedAgent,
+              agente_id: `AG-${Math.floor(7000 + Math.random() * 3000)}`,
+              cliente_nombre: detectedCustomer,
+              cliente_telefono: '+56 9 ' + Math.floor(60000000 + Math.random() * 39999999),
+              cola_atencion: queue,
+              duracion_total: formatSeconds(parsed.silencio_analisis?.duracion_total_segundos || 420),
+              duracion_segundos: parsed.silencio_analisis?.duracion_total_segundos || 420,
+              qa_score_global: avgScore,
+              sentimiento_label: parsed.sentimiento_score > 0.2 ? 'Positivo' : parsed.sentimiento_score < -0.2 ? 'Negativo' : 'Neutro',
+              modelo_procesado: model,
+              ...parsed,
+              segmentos: normalizedSegmentos,
+              transcripcion: {
+                segmentos: normalizedSegmentos
+              }
+            };
+
+            return res.status(200).json({
+              success: true,
+              data: completeRecord,
+              meta: {
+                engine: `Google Gemini Pay-As-You-Go (${model})`,
+                modelUsed: model,
+                apiKeyHarnessSlot: keyIdx + 1,
+                totalKeysConfigured: apiKeys.length,
+                attempts: attempt,
+                totalRetries: retryCount
+              }
+            });
+
+          } catch (err: unknown) {
+            const error = err as { status?: number; message?: string };
+            const status = error.status || 500;
+            const errMsg = error.message || String(err);
+            lastErrorDetail = errMsg;
+
+            if (status === 401 || status === 403 || errMsg.includes('API_KEY_INVALID') || errMsg.includes('unregistered project')) {
+              console.warn(`[Gemini Pay-As-You-Go] Clave inválida: ${errMsg}`);
+              break;
+            }
+
+            console.warn(`[Gemini Model Error] ${model}: ${errMsg}`);
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // 2. Secondary fallback: Groq (only if Gemini was not available or failed)
   const groqKey = process.env.GROQ_API_KEY;
   if (groqKey) {
     try {
-      console.log('[Engine] Procesando llamada con Groq (Whisper-v3 + Llama-3.3-70b)...');
+      console.log('[Engine Fallback] Intentando con Groq...');
       const groqResult = await analyzeWithGroq(
         groqKey,
         audioBase64,
@@ -483,159 +616,7 @@ AUDITORÍA DE CALIDAD Y SPEECH ANALYTICS (CLARO CHILE):
         }
       });
     } catch (groqErr: any) {
-      console.warn('[Engine Fallback] Groq falló, pasando a Gemini Multi-Key Harness:', groqErr?.message || groqErr);
-    }
-  }
-
-  // 2. Second priority: Gemini Multi-Key Harness
-  const apiKeys = getApiKeys();
-
-  if (apiKeys.length === 0 && !groqKey) {
-    const fallbackResult = generateRealisticMockAnalysis(fileName, agentName, queue, transcriptText);
-    return res.status(200).json({
-      success: true,
-      data: fallbackResult,
-      meta: {
-        engine: 'Intelligent Heuristics (Configure GROQ_API_KEY or GEMINI_API_KEY for live AI)',
-        modelUsed: 'local-qa-engine',
-        retries: 0
-      }
-    });
-  }
-
-  const models = requestedModelCascade && requestedModelCascade.length > 0 
-    ? requestedModelCascade 
-    : ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
-
-  let lastErrorDetail = '';
-  let retryCount = 0;
-
-  for (const model of models) {
-    for (let keyIdx = 0; keyIdx < apiKeys.length; keyIdx++) {
-      const activeKey = apiKeys[keyIdx];
-      const ai = getGenAIClient(activeKey);
-
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-          const parts: Array<Record<string, unknown>> = [];
-          
-          if (audioBase64) {
-            parts.push({
-              inlineData: {
-                data: audioBase64,
-                mimeType: mimeType || 'audio/wav',
-              }
-            });
-          }
-          
-          if (transcriptText) {
-            parts.push({ text: `Transcripción o contexto inicial de la llamada:\n${transcriptText}` });
-          }
-
-          parts.push({ text: prompt });
-
-          const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Model timeout after 60s')), 60000)
-          );
-
-          const generatePromise = ai.models.generateContent({
-            model,
-            contents: parts,
-            config: {
-              temperature: 0.1,
-              maxOutputTokens: 16384,
-              responseMimeType: 'application/json',
-              responseSchema: callAnalysisSchema,
-            }
-          });
-
-          const response = (await Promise.race([generatePromise, timeoutPromise])) as { text?: string };
-
-          const rawText = response.text?.trim() || '{}';
-          const parsed = JSON.parse(rawText);
-
-          const crits = parsed.evaluacion_criterios;
-          const avgScore = crits ? Math.round(
-            (crits.amabilidad_empatia.nota +
-             crits.seguridad_expresarse.nota +
-             crits.claridad_informacion.nota +
-             crits.tiempos_espera_hold.nota +
-             crits.eficiencia_tmo.nota) / 5
-          ) : 70;
-
-          const rawSegs = parsed.segmentos || parsed.transcripcion?.segmentos || [];
-          const normalizedSegmentos = rawSegs.map((seg: any, idx: number) => ({
-            id: seg.id || `seg-${idx + 1}`,
-            hablante: seg.hablante === 'cliente' ? 'cliente' : 'agente',
-            inicio: typeof seg.inicio === 'number' ? seg.inicio : 0,
-            fin: typeof seg.fin === 'number' ? seg.fin : 5,
-            texto: seg.texto || '',
-            sentimientoScore: typeof seg.sentimientoScore === 'number' ? seg.sentimientoScore : 0
-          }));
-
-          const detectedAgent = parsed.agente_nombre_detectado && parsed.agente_nombre_detectado !== 'Asesor' 
-            ? parsed.agente_nombre_detectado 
-            : agentName;
-          const detectedCustomer = parsed.cliente_nombre_detectado && parsed.cliente_nombre_detectado !== 'Cliente'
-            ? parsed.cliente_nombre_detectado
-            : 'Cliente Claro';
-
-          const completeRecord = {
-            id: `call-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
-            codigo_llamada: `REC-2026-CHILE-${Math.floor(1000 + Math.random() * 9000)}`,
-            fecha_hora: new Date().toISOString().replace('T', ' ').substring(0, 16),
-            agente_nombre: detectedAgent,
-            agente_id: `AG-${Math.floor(7000 + Math.random() * 3000)}`,
-            cliente_nombre: detectedCustomer,
-            cliente_telefono: '+56 9 ' + Math.floor(60000000 + Math.random() * 39999999),
-            cola_atencion: queue,
-            duracion_total: formatSeconds(parsed.silencio_analisis?.duracion_total_segundos || 420),
-            duracion_segundos: parsed.silencio_analisis?.duracion_total_segundos || 420,
-            qa_score_global: avgScore,
-            sentimiento_label: parsed.sentimiento_score > 0.2 ? 'Positivo' : parsed.sentimiento_score < -0.2 ? 'Negativo' : 'Neutro',
-            modelo_procesado: model,
-            ...parsed,
-            segmentos: normalizedSegmentos,
-            transcripcion: {
-              segmentos: normalizedSegmentos
-            }
-          };
-
-          return res.status(200).json({
-            success: true,
-            data: completeRecord,
-            meta: {
-              engine: 'Gemini AI Studio Multi-Key',
-              modelUsed: model,
-              apiKeyHarnessSlot: keyIdx + 1,
-              totalKeysConfigured: apiKeys.length,
-              attempts: attempt,
-              totalRetries: retryCount
-            }
-          });
-
-        } catch (err: unknown) {
-          const error = err as { status?: number; message?: string };
-          const status = error.status || 500;
-          const errMsg = error.message || String(err);
-          lastErrorDetail = errMsg;
-
-          if (status === 401 || status === 403 || errMsg.includes('API_KEY_INVALID') || errMsg.includes('unregistered project')) {
-            console.warn(`[API Key Harness] Key #${keyIdx + 1} inválida. Rotando...`);
-            break;
-          }
-
-          const is429 = status === 429 || errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('Too Many Requests');
-          if (is429) {
-            retryCount++;
-            console.warn(`[API Key Harness] Key #${keyIdx + 1} saturada 429. Rotando al instante...`);
-            break;
-          } else {
-            console.warn(`[Model Error] ${model} (Key #${keyIdx + 1}): ${errMsg}`);
-            break;
-          }
-        }
-      }
+      console.warn('[Engine Fallback] Groq falló:', groqErr?.message || groqErr);
     }
   }
 

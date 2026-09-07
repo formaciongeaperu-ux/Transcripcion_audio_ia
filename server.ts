@@ -549,51 +549,8 @@ AUDITORÍA DE CALIDAD Y SPEECH ANALYTICS (CLARO CHILE):
 4. Tiempo de Silencio Conversacional: Evalúa el silencio considerando ÚNICAMENTE desde que le ingresa la llamada al agente y puede interactuar, separándolo del IVR previo.
 5. Plan de coaching y feedback accionable para el asesor, incluyendo guion sugerido alternativo y plan de acción.`;
 
-  // 1. First priority: Groq Ultra-Fast Whisper + LLaMA 3.3 Engine
-  const groqKey = process.env.GROQ_API_KEY;
-  if (groqKey) {
-    try {
-      console.log('[Engine] Procesando llamada con Groq (Whisper-v3 + Llama-3.3-70b)...');
-      const groqResult = await analyzeWithGroq(
-        groqKey,
-        audioBase64,
-        fileName,
-        agentName,
-        queue,
-        prompt,
-        transcriptText
-      );
-      return res.status(200).json({
-        success: true,
-        data: groqResult,
-        meta: {
-          engine: 'Groq Ultra-Fast (Whisper-v3 + LLaMA-3.3-70B)',
-          modelUsed: 'whisper-large-v3-turbo / llama-3.3-70b',
-          latency: 'ultra-low'
-        }
-      });
-    } catch (groqErr: any) {
-      console.warn('[Engine Fallback] Groq falló, pasando a Gemini Multi-Key Harness:', groqErr?.message || groqErr);
-    }
-  }
-
-  // 2. Second priority: Gemini Multi-Key Harness
+  // 1. First & Primary Priority: Google Gemini Pay-As-You-Go (Direct official key)
   const apiKeys = getApiKeys();
-
-  if (apiKeys.length === 0 && !groqKey) {
-    const fallbackResult = generateRealisticMockAnalysis(fileName, agentName, queue, transcriptText);
-    return res.status(200).json({
-      success: true,
-      data: fallbackResult,
-      meta: {
-        engine: 'Intelligent Heuristics (Configure GROQ_API_KEY or GEMINI_API_KEY for live AI)',
-        modelUsed: 'local-qa-engine',
-        retries: 0
-      }
-    });
-  }
-
-  // Resilience Cascade loop
   const models = requestedModelCascade && requestedModelCascade.length > 0 
     ? requestedModelCascade 
     : ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
@@ -607,12 +564,11 @@ AUDITORÍA DE CALIDAD Y SPEECH ANALYTICS (CLARO CHILE):
     transcodedAudioBase64 = await transcodeToCanonicalWav(audioBase64);
   }
 
-  // Iterate over models in cascade
-  for (const model of models) {
-    // Iterate over API keys in harness pool
-    for (let keyIdx = 0; keyIdx < apiKeys.length; keyIdx++) {
-      const activeKey = apiKeys[keyIdx];
-      const ai = getGenAIClient(activeKey);
+  if (apiKeys.length > 0) {
+    for (const model of models) {
+      for (let keyIdx = 0; keyIdx < apiKeys.length; keyIdx++) {
+        const activeKey = apiKeys[keyIdx];
+        const ai = getGenAIClient(activeKey);
 
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
@@ -741,7 +697,35 @@ AUDITORÍA DE CALIDAD Y SPEECH ANALYTICS (CLARO CHILE):
     }
   }
 
-  // If all models and API keys in cascade exhausted retries:
+  // 2. Secondary fallback: Groq (only if Gemini was not available or failed)
+  const groqKey = process.env.GROQ_API_KEY;
+  if (groqKey) {
+    try {
+      console.log('[Engine Fallback] Intentando con Groq...');
+      const groqResult = await analyzeWithGroq(
+        groqKey,
+        audioBase64,
+        fileName,
+        agentName,
+        queue,
+        prompt,
+        transcriptText
+      );
+      return res.status(200).json({
+        success: true,
+        data: groqResult,
+        meta: {
+          engine: 'Groq Ultra-Fast (Whisper-v3 + LLaMA-3.3-70B)',
+          modelUsed: 'whisper-large-v3-turbo / llama-3.3-70b',
+          latency: 'ultra-low'
+        }
+      });
+    } catch (groqErr: any) {
+      console.warn('[Engine Fallback] Groq falló:', groqErr?.message || groqErr);
+    }
+  }
+
+  // If all models and API keys exhausted retries:
   res.status(429).json({
     success: false,
     errorType: 'QUOTA_EXHAUSTED_ALL_MODELS',
