@@ -97,8 +97,8 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="hidden items-center gap-1.5 rounded-full border border-[#DADCE0] bg-[#F8F9FA] px-3 py-1.5 text-xs text-[#3C4043] lg:flex">
           <Sparkles className="h-3.5 w-3.5 text-[#1A73E8]" />
           <span className="font-medium text-[#202124]">Cascade:</span>
-          <span className="font-mono text-[11px] text-[#1A73E8]">gemini-2.5-flash</span>
-          <span className="text-[10px] text-[#5F6368]">→ lite → pro</span>
+          <span className="font-mono text-[11px] text-[#1A73E8]">gemini-3.6-flash</span>
+          <span className="text-[10px] text-[#5F6368]">→ 3.5 → cascade</span>
         </div>
 
         {/* Deferred 429 Queue button */}

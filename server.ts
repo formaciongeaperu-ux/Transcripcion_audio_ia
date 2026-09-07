@@ -71,7 +71,7 @@ app.get('/api/health', (req, res) => {
     status: 'ok',
     geminiKeyConfigured: keys.length > 0,
     totalApiKeysInHarness: keys.length,
-    supportedModels: ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'],
+    supportedModels: ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-2.5-flash'],
     serverTime: new Date().toISOString(),
   });
 });
@@ -391,14 +391,10 @@ Responde ÚNICAMENTE con un JSON válido que contenga la estructura exacta solic
 }`;
 
   const candidateGroqModels = [
-    'llama-3.1-8b-instant',
-    'llama-3.1-70b-versatile',
-    'llama3-70b-8192',
-    'llama3-8b-8192',
-    'mixtral-8x7b-32768',
-    'gemma2-9b-it',
     'llama-3.3-70b-versatile',
-    'llama-3.3-70b-specdec'
+    'llama-3.1-8b-instant',
+    'mixtral-8x7b-32768',
+    'gemma2-9b-it'
   ];
 
   let rawJson = '';
@@ -497,7 +493,7 @@ app.post('/api/analyze-call', async (req, res) => {
     transcriptText,
     agentName = 'Asesor Claro',
     queue = 'Exclusivo Postpago Chile',
-    requestedModelCascade = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
+    requestedModelCascade = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.1-pro', 'gemini-2.5-flash']
   } = req.body;
 
   const prompt = `Eres un auditor experto en Speech Analytics y Aseguramiento de la Calidad (QA) para Contact Centers de Claro en Chile.
@@ -600,7 +596,7 @@ AUDITORÍA DE CALIDAD Y SPEECH ANALYTICS (CLARO CHILE):
   // Resilience Cascade loop
   const models = requestedModelCascade && requestedModelCascade.length > 0 
     ? requestedModelCascade 
-    : ['gemini-2.0-flash', 'gemini-1.5-flash-8b', 'gemini-1.5-pro', 'gemini-2.0-flash-exp', 'gemini-2.5-flash'];
+    : ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.1-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'];
 
   let lastErrorDetail = '';
   let retryCount = 0;
@@ -937,6 +933,8 @@ function generateRealisticMockAnalysis(fileName: string, agentName: string, queu
 
 // Start server with Vite middleware in dev or static serving in prod
 async function startServer() {
+  let currentPort = Number(process.env.PORT) || 3000;
+
   if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
@@ -952,8 +950,20 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Claro Speech Analytics server running on port ${PORT}`);
+  const server = app.listen(currentPort, '0.0.0.0', () => {
+    console.log(`\n======================================================`);
+    console.log(`🚀 Claro Speech Analytics listo en: http://localhost:${currentPort}`);
+    console.log(`======================================================\n`);
+  });
+
+  server.on('error', (err: any) => {
+    if (err.code === 'EADDRINUSE') {
+      currentPort++;
+      console.log(`⚠️ Puerto ocupado, reintentando automáticamente en http://localhost:${currentPort}...`);
+      server.listen(currentPort, '0.0.0.0');
+    } else {
+      console.error('Server error:', err);
+    }
   });
 }
 

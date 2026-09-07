@@ -308,14 +308,10 @@ Responde ÚNICAMENTE con un JSON válido que contenga la estructura exacta solic
 }`;
 
   const candidateGroqModels = [
-    'llama-3.1-8b-instant',
-    'llama-3.1-70b-versatile',
-    'llama3-70b-8192',
-    'llama3-8b-8192',
-    'mixtral-8x7b-32768',
-    'gemma2-9b-it',
     'llama-3.3-70b-versatile',
-    'llama-3.3-70b-specdec'
+    'llama-3.1-8b-instant',
+    'mixtral-8x7b-32768',
+    'gemma2-9b-it'
   ];
 
   let rawJson = '';
@@ -417,7 +413,7 @@ export default async function handler(req: any, res: any) {
     transcriptText,
     agentName = 'Asesor Claro',
     queue = 'Exclusivo Postpago Chile',
-    requestedModelCascade = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
+    requestedModelCascade = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.1-pro', 'gemini-2.5-flash']
   } = req.body || {};
 
   const prompt = `Eres un auditor experto en Speech Analytics y Aseguramiento de la Calidad (QA) para Contact Centers de Claro en Chile.
@@ -509,7 +505,7 @@ AUDITORÍA DE CALIDAD Y SPEECH ANALYTICS (CLARO CHILE):
 
   const models = requestedModelCascade && requestedModelCascade.length > 0 
     ? requestedModelCascade 
-    : ['gemini-2.0-flash', 'gemini-1.5-flash-8b', 'gemini-1.5-pro', 'gemini-2.0-flash-exp', 'gemini-2.5-flash'];
+    : ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.1-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'];
 
   let lastErrorDetail = '';
   let retryCount = 0;
