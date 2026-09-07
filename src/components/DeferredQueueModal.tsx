@@ -73,7 +73,7 @@ export const DeferredQueueModal: React.FC<DeferredQueueModalProps> = ({
               <div className="text-xs">
                 <span className="font-bold text-[#B06000]">Mecanismo de Resiliencia Activo:</span>
                 <p className="mt-1 leading-relaxed text-[#3C4043]">
-                  Cuando los modelos en cascada (gemini-3.6-flash → gemini-3.5-flash → gemini-2.5-flash) agotan su cuota de peticiones simultáneas, las llamadas se resguardan aquí para ser reintentadas automáticamente sin perder datos.
+                  Cuando los modelos en cascada (gemini-2.5-flash → gemini-2.0-flash → gemini-1.5-flash) agotan su cuota de peticiones simultáneas, las llamadas se resguardan aquí para ser reintentadas automáticamente sin perder datos.
                 </p>
               </div>
             </div>
