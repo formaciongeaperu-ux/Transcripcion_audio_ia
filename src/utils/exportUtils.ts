@@ -5,9 +5,10 @@ export function exportCallsToExcel(calls: CallRecord[], fileName: string = 'Repo
   // Main calls sheet data
   const mainData = calls.map(c => ({
     'Código de Grabación': c.codigo_llamada,
+    'Nombre de Archivo': c.file_name || c.audioFile?.name || 'grabacion.wav',
     'Fecha y Hora': c.fecha_hora,
+    'ID Asesor': c.agente_id || '',
     'Asesor': c.agente_nombre,
-    'ID Asesor': c.agente_id,
     'Cliente': c.cliente_nombre,
     'Teléfono': c.cliente_telefono,
     'Cola de Atención': c.cola_atencion,
@@ -54,6 +55,8 @@ export function exportCallsToExcel(calls: CallRecord[], fileName: string = 'Repo
     (call.quiebres_atencion || []).forEach(q => {
       quiebresData.push({
         'Código Grabación': call.codigo_llamada,
+        'Nombre de Archivo': call.file_name || call.audioFile?.name || '',
+        'ID Asesor': call.agente_id || '',
         'Asesor': call.agente_nombre,
         'Cola': call.cola_atencion,
         'Marca de Tiempo': q.tiempo,
@@ -83,9 +86,10 @@ export function exportCallsToExcel(calls: CallRecord[], fileName: string = 'Repo
 export function exportCallsToCSV(calls: CallRecord[], fileName: string = 'Auditoria_Llamadas_Claro.csv') {
   const headers = [
     'Codigo_Llamada',
+    'Nombre_Archivo',
     'Fecha_Hora',
-    'Asesor',
     'ID_Asesor',
+    'Asesor',
     'Cola_Atencion',
     'Driver',
     'TMO',
@@ -104,9 +108,10 @@ export function exportCallsToCSV(calls: CallRecord[], fileName: string = 'Audito
 
   const rows = calls.map(c => [
     `"${c.codigo_llamada}"`,
+    `"${(c.file_name || c.audioFile?.name || 'grabacion.wav').replace(/"/g, '""')}"`,
     `"${c.fecha_hora}"`,
+    `"${c.agente_id || ''}"`,
     `"${c.agente_nombre}"`,
-    `"${c.agente_id}"`,
     `"${c.cola_atencion}"`,
     `"${c.motivo_nombre.replace(/"/g, '""')}"`,
     `"${c.duracion_total}"`,

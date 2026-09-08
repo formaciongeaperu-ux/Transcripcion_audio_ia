@@ -51,7 +51,9 @@ export const CallsExplorerView: React.FC<CallsExplorerViewProps> = ({
         const matchesSearch =
           searchTerm === '' ||
           c.codigo_llamada.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (c.file_name && c.file_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
           c.agente_nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (c.agente_id && c.agente_id.toLowerCase().includes(searchTerm.toLowerCase())) ||
           c.cliente_nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
           c.motivo_nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
           c.resumen.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -298,6 +300,11 @@ export const CallsExplorerView: React.FC<CallsExplorerViewProps> = ({
                       <div className="font-mono font-bold text-[#1A73E8]">
                         {call.codigo_llamada}
                       </div>
+                      {call.file_name && (
+                        <div className="line-clamp-1 max-w-[180px] font-mono text-[10px] text-[#5F6368]" title={call.file_name}>
+                          📁 {call.file_name}
+                        </div>
+                      )}
                       <div className="text-[11px] text-[#5F6368]">{call.fecha_hora}</div>
                     </td>
 

@@ -458,7 +458,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
           <button 
             type="button"
             className="shrink-0 rounded-xl bg-[#1A73E8] px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs transition hover:bg-[#1557B0]"
-          >
+                    >
             Seleccionar Audio
           </button>
         </div>

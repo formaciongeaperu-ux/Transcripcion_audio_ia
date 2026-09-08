@@ -286,7 +286,8 @@ async function analyzeWithGroq(
   agentName: string,
   queue: string,
   promptText: string,
-  initialTranscript?: string
+  initialTranscript?: string,
+  agentId?: string
 ) {
   let transcriptText = initialTranscript || '';
   let durationSec = 180;
@@ -464,8 +465,9 @@ Responde ÚNICAMENTE con un JSON válido que contenga la estructura exacta solic
     id: `call-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
     codigo_llamada: `REC-2026-CHILE-${Math.floor(1000 + Math.random() * 9000)}`,
     fecha_hora: new Date().toISOString().replace('T', ' ').substring(0, 16),
+    file_name: fileName,
     agente_nombre: parsed.agente_nombre_detectado || agentName,
-    agente_id: `AG-${Math.floor(7000 + Math.random() * 3000)}`,
+    agente_id: agentId || (parsed.agente_id_detectado || `AG-${Math.floor(7000 + Math.random() * 3000)}`),
     cliente_nombre: parsed.cliente_nombre_detectado || 'Cliente Claro',
     cliente_telefono: '+56 9 ' + Math.floor(60000000 + Math.random() * 39999999),
     cola_atencion: queue,
@@ -492,6 +494,7 @@ app.post('/api/analyze-call', async (req, res) => {
     fileName = 'grabacion.wav',
     transcriptText,
     agentName = 'Asesor Claro',
+    agentId,
     queue = 'Exclusivo Postpago Chile',
     requestedModelCascade = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-flash-latest']
   } = req.body;
@@ -639,8 +642,9 @@ AUDITORÍA DE CALIDAD Y SPEECH ANALYTICS (CLARO CHILE):
             id: `call-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
             codigo_llamada: `REC-2026-CHILE-${Math.floor(1000 + Math.random() * 9000)}`,
             fecha_hora: new Date().toISOString().replace('T', ' ').substring(0, 16),
+            file_name: fileName,
             agente_nombre: detectedAgent,
-            agente_id: `AG-${Math.floor(7000 + Math.random() * 3000)}`,
+            agente_id: agentId || (parsed.agente_id_detectado || `AG-${Math.floor(7000 + Math.random() * 3000)}`),
             cliente_nombre: detectedCustomer,
             cliente_telefono: '+56 9 ' + Math.floor(60000000 + Math.random() * 39999999),
             cola_atencion: queue,
@@ -709,7 +713,8 @@ AUDITORÍA DE CALIDAD Y SPEECH ANALYTICS (CLARO CHILE):
         agentName,
         queue,
         prompt,
-        transcriptText
+        transcriptText,
+        agentId
       );
       return res.status(200).json({
         success: true,
@@ -751,7 +756,7 @@ function formatSeconds(secs: number): string {
 }
 
 // Realistic fallback generator when API key is not present
-function generateRealisticMockAnalysis(fileName: string, agentName: string, queue: string, transcriptText?: string) {
+function generateRealisticMockAnalysis(fileName: string, agentName: string, queue: string, transcriptText?: string, agentId?: string) {
   const isDetractor = fileName.toLowerCase().includes('reclamo') || fileName.toLowerCase().includes('boleta') || fileName.toLowerCase().includes('baja');
   const durSec = 380 + Math.floor(Math.random() * 200);
   const ivrSec = 90 + Math.floor(Math.random() * 150);
@@ -762,8 +767,9 @@ function generateRealisticMockAnalysis(fileName: string, agentName: string, queu
     id: `call-${Date.now()}`,
     codigo_llamada: `REC-2026-CHILE-${Math.floor(2000 + Math.random() * 7000)}`,
     fecha_hora: new Date().toISOString().replace('T', ' ').substring(0, 16),
+    file_name: fileName,
     agente_nombre: agentName,
-    agente_id: `AG-${Math.floor(7000 + Math.random() * 3000)}`,
+    agente_id: agentId || `AG-${Math.floor(7000 + Math.random() * 3000)}`,
     cliente_nombre: 'Carolina Valenzuela P.',
     cliente_telefono: '+56 9 7842 1190',
     cola_atencion: queue,

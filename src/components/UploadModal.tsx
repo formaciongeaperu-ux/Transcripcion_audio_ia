@@ -35,9 +35,9 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   const [concurrency, setConcurrency] = useState<number>(3);
   const [optimizeAudio, setOptimizeAudio] = useState<boolean>(true);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
-  const [overallProgress, setOverallProgress] = useState<number>(0);
-  const [agentName, setAgentName] = useState('Asesor Claro');
-  const [queueName, setQueueName] = useState('Exclusivo Postpago Chile');
+  const [agentId, setAgentId] = useState<string>('AG-4029');
+  const [agentName, setAgentName] = useState<string>('Asesor Claro');
+  const [queueName, setQueueName] = useState<string>('Exclusivo Postpago Chile');
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -143,7 +143,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
             audioBase64: processedBase64,
             mimeType: 'audio/wav',
             fileName: item.file.name,
-            agentName,
+            agentId: agentId.trim() || undefined,
+            agentName: agentName.trim() || undefined,
             queue: queueName,
           }),
         });
@@ -175,6 +176,12 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           callData.audio_url = audioUrl;
           callData.audioFile = item.file;
           callData.file_name = item.file.name;
+          if (agentId.trim()) {
+            callData.agente_id = agentId.trim();
+          }
+          if (agentName.trim()) {
+            callData.agente_nombre = agentName.trim();
+          }
           completedCalls.push(callData);
 
           setItems((prev) =>
@@ -336,9 +343,19 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           </div>
 
           {/* Context Fields */}
-          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
-              <label className="text-[11px] font-bold text-[#5F6368]">Asesor Asignado:</label>
+              <label className="text-[11px] font-bold text-[#5F6368]">ID / Código Asesor:</label>
+              <input
+                type="text"
+                value={agentId}
+                onChange={(e) => setAgentId(e.target.value)}
+                placeholder="Ej. AG-4029 o 748291"
+                className="mt-1 h-9 w-full rounded-xl border border-[#DADCE0] px-3 font-mono text-xs outline-none focus:border-[#1A73E8]"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] font-bold text-[#5F6368]">Nombre Asesor:</label>
               <input
                 type="text"
                 value={agentName}

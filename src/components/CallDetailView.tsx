@@ -169,7 +169,12 @@ export const CallDetailView: React.FC<CallDetailViewProps> = ({
               </span>
             </div>
             <p className="text-xs text-[#5F6368]">
-              Asesor: <strong className="text-[#202124]">{call.agente_nombre}</strong> ({call.agente_id}) • {call.fecha_hora}
+              Asesor: <strong className="text-[#202124]">{call.agente_nombre}</strong> (<span className="font-mono">{call.agente_id}</span>) • {call.fecha_hora}
+              {(call.file_name || call.audioFile?.name) && (
+                <span className="ml-2 inline-flex items-center rounded-md bg-[#F1F3F4] px-1.5 py-0.5 font-mono text-[10px] text-[#3C4043]">
+                  📁 {call.file_name || call.audioFile?.name}
+                </span>
+              )}
             </p>
           </div>
         </div>
