@@ -138,6 +138,25 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   // Total Quiebres
   const totalQuiebres = calls.reduce((sum, c) => sum + (c.quiebres_atencion?.length || 0), 0);
 
+  // Dynamic SVG NPS Curve Coordinates calculated directly from real percentages
+  const baselineY = 114;
+  const maxPeakDelta = 92;
+  const yProm = Math.max(16, Math.round(baselineY - ((promotoresPct || 0) / 100) * maxPeakDelta));
+  const yNeut = Math.max(16, Math.round(baselineY - ((neutrosPct || 0) / 100) * maxPeakDelta));
+  const yDetr = Math.max(16, Math.round(baselineY - ((detractoresPct || 0) / 100) * maxPeakDelta));
+
+  const midY1 = Math.round((yProm + yNeut) / 2);
+  const midY2 = Math.round((yNeut + yDetr) / 2);
+
+  const pathPromArea = `M 0 114 C 60 114, 110 ${yProm}, 190 ${midY1} L 190 120 L 0 120 Z`;
+  const pathPromLine = `M 0 114 C 60 114, 110 ${yProm}, 190 ${midY1}`;
+
+  const pathNeutArea = `M 190 ${midY1} C 250 ${yNeut}, 330 ${yNeut}, 390 ${midY2} L 390 120 L 190 120 Z`;
+  const pathNeutLine = `M 190 ${midY1} C 250 ${yNeut}, 330 ${yNeut}, 390 ${midY2}`;
+
+  const pathDetrArea = `M 390 ${midY2} C 460 ${yDetr}, 530 ${yDetr}, 600 ${yDetr} L 600 120 L 390 120 Z`;
+  const pathDetrLine = `M 390 ${midY2} C 460 ${yDetr}, 530 ${yDetr}, 600 ${yDetr}`;
+
   // Script compliance average (Pauta 4 Fases Claro Chile)
   const scriptComplianceRate = totalCalls > 0 
     ? Math.round(
@@ -388,23 +407,26 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </span>
             </div>
 
-            {/* Legend Row */}
+            {/* Legend Row with Dynamic Percentages and Counts */}
             <div className="mt-4 flex flex-wrap items-center gap-6 text-xs font-bold">
               <div className="flex items-center gap-1.5 text-[#137333]">
                 <span className="h-2.5 w-2.5 rounded-full bg-[#34A853]" />
-                <span>PROMOTORES (9-10)</span>
+                <span>PROMOTORES (9-10): {promotoresPct}%</span>
+                <span className="font-normal text-[#5F6368]">({promotoresCount})</span>
               </div>
               <div className="flex items-center gap-1.5 text-[#B06000]">
                 <span className="h-2.5 w-2.5 rounded-full bg-[#FBBC05]" />
-                <span>NEUTROS (7-8)</span>
+                <span>NEUTROS (7-8): {neutrosPct}%</span>
+                <span className="font-normal text-[#5F6368]">({neutrosCount})</span>
               </div>
               <div className="flex items-center gap-1.5 text-[#EA4335]">
                 <span className="h-2.5 w-2.5 rounded-full bg-[#EA4335]" />
-                <span>DETRACTORES (0-6)</span>
+                <span>DETRACTORES (0-6): {detractoresPct}%</span>
+                <span className="font-normal text-[#5F6368]">({detractoresCount})</span>
               </div>
             </div>
 
-            {/* Continuous 3-Zone Curved Mountain Area Chart Matching Screenshot */}
+            {/* Continuous 3-Zone Curved Mountain Area Chart - 100% Data-Driven */}
             <div className="relative mt-4 h-32 w-full overflow-hidden rounded-xl border border-[#F1F3F4] bg-[#FAFAFA]">
               <svg
                 viewBox="0 0 600 120"
@@ -414,20 +436,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <defs>
                   {/* Green Gradient */}
                   <linearGradient id="gradPromotores" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#34A853" stopOpacity="0.35" />
+                    <stop offset="0%" stopColor="#34A853" stopOpacity="0.4" />
                     <stop offset="100%" stopColor="#34A853" stopOpacity="0.05" />
                   </linearGradient>
 
                   {/* Yellow Gradient */}
                   <linearGradient id="gradNeutros" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#FBBC05" stopOpacity="0.5" />
+                    <stop offset="0%" stopColor="#FBBC05" stopOpacity="0.45" />
                     <stop offset="100%" stopColor="#FBBC05" stopOpacity="0.08" />
                   </linearGradient>
 
                   {/* Red Gradient */}
                   <linearGradient id="gradDetractores" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#EA4335" stopOpacity="0.65" />
-                    <stop offset="100%" stopColor="#EA4335" stopOpacity="0.15" />
+                    <stop offset="0%" stopColor="#EA4335" stopOpacity="0.6" />
+                    <stop offset="100%" stopColor="#EA4335" stopOpacity="0.12" />
                   </linearGradient>
                 </defs>
 
@@ -435,41 +457,58 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <line x1="190" y1="0" x2="190" y2="120" stroke="#E8EAED" strokeWidth="1" strokeDasharray="3 3" />
                 <line x1="390" y1="0" x2="390" y2="120" stroke="#E8EAED" strokeWidth="1" strokeDasharray="3 3" />
 
-                {/* 1. Zone Promotores (0 to 190): Flat gentle base curve */}
+                {/* 1. Zone Promotores (0 to 190): Dynamic curve */}
                 <path
-                  d="M 0 114 C 60 114, 120 110, 190 106 L 190 120 L 0 120 Z"
+                  d={pathPromArea}
                   fill="url(#gradPromotores)"
+                  className="transition-all duration-700 ease-out"
                 />
                 <path
-                  d="M 0 114 C 60 114, 120 110, 190 106"
+                  d={pathPromLine}
                   fill="none"
                   stroke="#34A853"
                   strokeWidth="2.5"
+                  className="transition-all duration-700 ease-out"
                 />
 
-                {/* 2. Zone Neutros (190 to 390): Rising slope */}
+                {/* 2. Zone Neutros (190 to 390): Dynamic curve */}
                 <path
-                  d="M 190 106 C 260 100, 320 80, 390 64 L 390 120 L 190 120 Z"
+                  d={pathNeutArea}
                   fill="url(#gradNeutros)"
+                  className="transition-all duration-700 ease-out"
                 />
                 <path
-                  d="M 190 106 C 260 100, 320 80, 390 64"
+                  d={pathNeutLine}
                   fill="none"
                   stroke="#FBBC05"
                   strokeWidth="2.5"
+                  className="transition-all duration-700 ease-out"
                 />
 
-                {/* 3. Zone Detractores (390 to 600): High curved red hill */}
+                {/* 3. Zone Detractores (390 to 600): Dynamic curve */}
                 <path
-                  d="M 390 64 C 450 48, 520 28, 600 22 L 600 120 L 390 120 Z"
+                  d={pathDetrArea}
                   fill="url(#gradDetractores)"
+                  className="transition-all duration-700 ease-out"
                 />
                 <path
-                  d="M 390 64 C 450 48, 520 28, 600 22"
+                  d={pathDetrLine}
                   fill="none"
                   stroke="#EA4335"
                   strokeWidth="3"
+                  className="transition-all duration-700 ease-out"
                 />
+
+                {/* Floating Real Percentage Labels inside SVG */}
+                <text x="95" y="105" textAnchor="middle" fill="#137333" fontSize="12" fontWeight="700" fontFamily="sans-serif">
+                  {promotoresPct}%
+                </text>
+                <text x="290" y="105" textAnchor="middle" fill="#B06000" fontSize="12" fontWeight="700" fontFamily="sans-serif">
+                  {neutrosPct}%
+                </text>
+                <text x="495" y="105" textAnchor="middle" fill="#C5221F" fontSize="12" fontWeight="700" fontFamily="sans-serif">
+                  {detractoresPct}%
+                </text>
               </svg>
             </div>
           </div>
