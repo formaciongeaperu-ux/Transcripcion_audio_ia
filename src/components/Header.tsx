@@ -9,8 +9,7 @@ import {
   FileSpreadsheet,
   Command,
   Activity,
-  Filter,
-  GraduationCap
+  Filter
 } from 'lucide-react';
 import { GeaLogo } from './GeaLogo';
 
@@ -77,34 +76,15 @@ export const Header: React.FC<HeaderProps> = ({
                 SPEECH ANALYTICS
               </span>
             </div>
-            <div className="flex items-center gap-1.5 text-[10px] leading-tight tracking-tight">
+            <div className="flex items-center text-[10px] leading-tight tracking-tight">
               <span className="font-bold text-[#0072CE] uppercase tracking-wider">WORKFORCE MANAGEMENT</span>
-              <span className="hidden text-[#5F6368] font-medium sm:inline-block">• Speech Analytics</span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Middle: Command Bar & Cohort Selector */}
-      <div className="flex max-w-xl flex-1 items-center gap-2 px-3">
-        {/* Cohort / Nido Selector */}
-        {setSelectedCohort && (
-          <div className="hidden items-center gap-1.5 rounded-full border border-[#DADCE0] bg-[#F8F9FA] px-3 py-1.5 text-xs text-[#3C4043] xl:flex">
-            <GraduationCap className="h-3.5 w-3.5 text-[#1A73E8]" />
-            <select
-              value={selectedCohort}
-              onChange={(e) => setSelectedCohort(e.target.value)}
-              className="cursor-pointer bg-transparent text-xs font-semibold text-[#202124] outline-none"
-            >
-              <option value="all">Todos los Nidos OJT</option>
-              <option value="nido_movil">Nido Móvil Postpago</option>
-              <option value="nido_fibra">Nido Fibra y Fija</option>
-              <option value="nido_retenciones">Nido Retenciones & Bajas</option>
-              <option value="graduados">Producción Regular (Graduados)</option>
-            </select>
-          </div>
-        )}
-
+      {/* Middle: Command Bar */}
+      <div className="flex max-w-xl flex-1 items-center px-3">
         {/* Global Command Bar (Click opens CommandPalette or search) */}
         <div 
           onClick={onOpenCommandPalette}
