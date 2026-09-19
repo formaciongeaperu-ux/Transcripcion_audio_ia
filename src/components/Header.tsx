@@ -12,6 +12,7 @@ import {
   Filter,
   GraduationCap
 } from 'lucide-react';
+import { GeaLogo } from './GeaLogo';
 
 interface HeaderProps {
   sidebarOpen: boolean;
@@ -62,22 +63,24 @@ export const Header: React.FC<HeaderProps> = ({
           <Menu className="h-5 w-5" />
         </button>
 
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-[#DA291C] text-white shadow-sm ring-2 ring-[#DA291C]/20">
-            <PhoneCall className="h-4 w-4" />
+        <div className="flex items-center gap-3">
+          <div className="flex items-center justify-center">
+            <GeaLogo size={38} className="h-9 w-auto shrink-0 drop-shadow-xs" />
           </div>
-          <div className="flex flex-col">
+          <div className="flex flex-col justify-center">
             <div className="flex items-center gap-2">
-              <span className="font-['Google_Sans',sans-serif] text-sm font-bold tracking-tight text-[#202124] sm:text-base">
-                Claro Speech Analytics
+              <span className="font-['Google_Sans',sans-serif] text-base font-black tracking-tight leading-tight sm:text-lg">
+                <span className="text-[#072242]">GEA </span>
+                <span className="text-[#0072CE]">PERÚ</span>
               </span>
-              <span className="hidden rounded-full border border-[#DA291C]/20 bg-[#FCE8E6] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#C5221F] sm:inline-block">
-                ENTERPRISE QA & OJT
+              <span className="hidden rounded-full border border-[#0072CE]/25 bg-[#EBF3FC] px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#0072CE] sm:inline-block">
+                SPEECH ANALYTICS
               </span>
             </div>
-            <span className="hidden text-[10px] text-[#5F6368] sm:inline-block">
-              Aseguramiento de Calidad & Predicción tNPS • Claro Chile
-            </span>
+            <div className="flex items-center gap-1.5 text-[10px] leading-tight tracking-tight">
+              <span className="font-bold text-[#0072CE] uppercase tracking-wider">WORKFORCE MANAGEMENT</span>
+              <span className="hidden text-[#5F6368] font-medium sm:inline-block">• Speech Analytics</span>
+            </div>
           </div>
         </div>
       </div>
