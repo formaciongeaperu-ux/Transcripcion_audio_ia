@@ -1,4 +1,4 @@
-import { CallRecord } from '../types';
+import { CallRecord, getNormalizedNPS } from '../types';
 
 export const SHEET_TAB_NAME = 'Auditorias_Llamadas';
 
@@ -198,8 +198,10 @@ function callToRow(call: CallRecord): any[] {
     call.cola_atencion || 'Atención General',
     call.duracion_total || '00:00',
     call.qa_score_global ?? 0,
-    call.nps_pronostico?.score ?? 0,
-    call.nps_pronostico?.clasificacion ?? 'PASIVO',
+    typeof call.nps_pronostico?.score === 'number'
+      ? (getNormalizedNPS(call.nps_pronostico, call.qa_score_global) === 'PROMOTOR' && call.nps_pronostico.score < 9 ? 9 : call.nps_pronostico.score)
+      : (getNormalizedNPS(call.nps_pronostico, call.qa_score_global) === 'PROMOTOR' ? 9 : 7),
+    getNormalizedNPS(call.nps_pronostico, call.qa_score_global),
     f1,
     f2,
     f3,
@@ -290,8 +292,9 @@ export async function readCallsFromSpreadsheet(
     const duracion = r[7] || '00:00';
     const qaScore = parseFloat(r[8]) || 70;
     const npsScore = parseInt(r[9], 10) || 7;
+    const rawNpsClasif = (r[10] || '').toUpperCase();
     const npsClasif: 'PROMOTOR' | 'NEUTRO' | 'DETRACTOR' = 
-      npsScore >= 9 ? 'PROMOTOR' : npsScore >= 7 ? 'NEUTRO' : 'DETRACTOR';
+      (npsScore >= 9 || qaScore >= 85 || rawNpsClasif.includes('PROMOTOR')) ? 'PROMOTOR' : npsScore >= 7 ? 'NEUTRO' : 'DETRACTOR';
     
     // Check if new 21-column format or legacy 15-column format
     const isExtendedFormat = r.length >= 18;

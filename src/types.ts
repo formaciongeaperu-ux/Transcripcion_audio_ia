@@ -115,6 +115,41 @@ export interface NPSPronostico {
   camino_a_promotor?: string; // Tip formativo OJT para convertir al cliente en Promotor (9-10)
 }
 
+/**
+ * Normaliza y valida la clasificación tNPS de forma resiliente
+ * Garantiza que llamadas de alta calidad (QA >= 85%) o notas 9-10 cuenten correctamente como PROMOTOR
+ */
+export function getNormalizedNPS(
+  nps?: { score?: number; clasificacion?: string } | null,
+  qaScore?: number
+): NPSClasificacion {
+  if (!nps) {
+    if (typeof qaScore === 'number' && qaScore >= 85) return 'PROMOTOR';
+    return 'NEUTRO';
+  }
+
+  const raw = String(nps.clasificacion || '').toUpperCase().trim();
+  const score = typeof nps.score === 'number' ? nps.score : null;
+
+  // Si la nota numérica es 9 o 10, es PROMOTOR por definición
+  if (score !== null && score >= 9) return 'PROMOTOR';
+  // Si la nota numérica es <= 6, es DETRACTOR
+  if (score !== null && score <= 6) return 'DETRACTOR';
+
+  // Si contiene explícitamente PROMOTOR / PROMOTER
+  if (raw.includes('PROMOTOR') || raw.includes('PROMOTER')) return 'PROMOTOR';
+  if (raw.includes('DETRACTOR')) return 'DETRACTOR';
+
+  // Si el QA es sobresaliente (>= 85%) y no hubo detracciones críticas, clasificar como PROMOTOR
+  if (typeof qaScore === 'number' && qaScore >= 85 && (score === null || score >= 7)) {
+    return 'PROMOTOR';
+  }
+
+  if (raw.includes('NEUTRO') || raw.includes('PASIVO') || raw.includes('NEUTRAL')) return 'NEUTRO';
+
+  return 'NEUTRO';
+}
+
 export interface SilencioAnalisis {
   duracion_total_segundos: number;
   tiempo_ivr_segundos: number; // Previo a la atención del agente

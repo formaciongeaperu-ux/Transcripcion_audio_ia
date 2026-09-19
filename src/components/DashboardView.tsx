@@ -15,7 +15,7 @@ import {
   Lightbulb,
   Globe
 } from 'lucide-react';
-import { CallRecord } from '../types';
+import { CallRecord, getNormalizedNPS } from '../types';
 
 interface DashboardViewProps {
   calls: CallRecord[];
@@ -101,10 +101,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     ? Math.round(calls.reduce((sum, c) => sum + c.qa_score_global, 0) / totalCalls)
     : 0;
 
-  // NPS Calculation: % Promotores - % Detractores
-  const promotoresCount = calls.filter((c) => c.nps_pronostico?.clasificacion === 'PROMOTOR').length;
-  const neutrosCount = calls.filter((c) => c.nps_pronostico?.clasificacion === 'NEUTRO').length;
-  const detractoresCount = calls.filter((c) => c.nps_pronostico?.clasificacion === 'DETRACTOR').length;
+  // NPS Calculation: % Promotores - % Detractores (Normalized)
+  const promotoresCount = calls.filter((c) => getNormalizedNPS(c.nps_pronostico, c.qa_score_global) === 'PROMOTOR').length;
+  const neutrosCount = calls.filter((c) => getNormalizedNPS(c.nps_pronostico, c.qa_score_global) === 'NEUTRO').length;
+  const detractoresCount = calls.filter((c) => getNormalizedNPS(c.nps_pronostico, c.qa_score_global) === 'DETRACTOR').length;
 
   const promotoresPct = totalCalls > 0 ? Math.round((promotoresCount / totalCalls) * 100) : 0;
   const neutrosPct = totalCalls > 0 ? Math.round((neutrosCount / totalCalls) * 100) : 0;
@@ -679,17 +679,25 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       </span>
                     </td>
                     <td className="py-2.5 px-3">
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                          c.nps_pronostico?.clasificacion === 'DETRACTOR'
-                            ? 'bg-[#FCE8E6] text-[#EA4335]'
-                            : c.nps_pronostico?.clasificacion === 'PROMOTOR'
-                            ? 'bg-[#E6F4EA] text-[#137333]'
-                            : 'bg-[#FEF7E0] text-[#B06000]'
-                        }`}
-                      >
-                        {c.nps_pronostico?.score}/10 ({c.nps_pronostico?.clasificacion})
-                      </span>
+                      {(() => {
+                        const npsClasif = getNormalizedNPS(c.nps_pronostico, c.qa_score_global);
+                        const effectiveScore = typeof c.nps_pronostico?.score === 'number'
+                          ? (npsClasif === 'PROMOTOR' && c.nps_pronostico.score < 9 ? 9 : c.nps_pronostico.score)
+                          : (npsClasif === 'PROMOTOR' ? 9 : npsClasif === 'DETRACTOR' ? 3 : 7);
+                        return (
+                          <span
+                            className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                              npsClasif === 'DETRACTOR'
+                                ? 'bg-[#FCE8E6] text-[#EA4335]'
+                                : npsClasif === 'PROMOTOR'
+                                ? 'bg-[#E6F4EA] text-[#137333]'
+                                : 'bg-[#FEF7E0] text-[#B06000]'
+                            }`}
+                          >
+                            {effectiveScore}/10 ({npsClasif})
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="py-2.5 px-3">
                       {c.quiebres_atencion && c.quiebres_atencion.length > 0 ? (

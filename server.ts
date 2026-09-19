@@ -124,12 +124,14 @@ CONTEXTO CRÍTICO DE OJT (ON-THE-JOB TRAINING / PISO DE ENTRENAMIENTO EN VIVO):
     - 'observacion_piso_real': diagnóstico de cómo lidió con el cliente chileno real.
 
 CALIBRACIÓN tNPS AMIGABLE, EQUILIBRADA Y JUSTA:
-- El tNPS predicho debe ser constructivo y realista. Los clientes de telecomunicaciones suelen separar la molestia con la empresa Claro (boletas altas, caídas de señal) de la atención humana del asesor.
+- El tNPS predicho debe ser constructivo, equilibrado y fiel a la satisfacción real del cliente Claro.
 - REGLAS OBLIGATORIAS DE CALIBRACIÓN tNPS:
-  1. Desacopla la marca del asesor: Si el cliente empezó molesto por un cobro o falla de Claro, pero el asesor novel fue paciente, empático y predispuesto, califica su esfuerzo humano en 'score_agente' (0-10) y explícalo en 'factor_marca_vs_agente'.
-  2. Sensibilidad al cierre real: Si el cliente finalizó tranquilo, conforme o agradeciendo la atención ("gracias por su tiempo", "muy amable", "se pasó", "gracias por la paciencia"), el tNPS global DEBE situarse en NEUTRO (7-8) o PROMOTOR (9-10). ¡Nunca clasifiques a un cliente agradecido como DETRACTOR!
-  3. Zona constructiva en OJT (Neutros 7-8): En OJT, un Neutro (7-8) no es un fracaso; es un "Casi Promotor". Explica en 'camino_a_promotor' qué pequeño detalle puntual (ej: mayor seguridad vocal, resumir las condiciones sin dudar) lo convertiría en 9 o 10.
-  4. Reserva DETRACTOR (0-6) únicamente cuando hubo un quiebre grave originado directamente por el asesor (maltrato, tono cortante, colgar intencionalmente, desinformación o abandono).
+  1. REGLA DE ORO PROMOTORES (9-10): Si la atención fue de calidad alta o sobresaliente (QA Score >= 80%), el problema fue resuelto o gestionado correctamente, y el cliente finaliza satisfecho, tranquilo, o agradeciendo ("gracias", "muy amable", "se pasó", "impecable"), el tNPS global DEBE ser clasificado OBLIGATORIAMENTE como 'PROMOTOR' con nota 9 o 10. ¡Nunca dejes en Neutro una llamada con buen servicio y resolución positiva!
+  2. Desacopla la marca del asesor: Si el cliente empezó molesto por un cobro o falla de Claro, pero el asesor novel fue paciente, empático y resolutivo, califica su esfuerzo humano en 'score_agente' (0-10) y explícalo en 'factor_marca_vs_agente'.
+  3. Sensibilidad al cierre real: Si el cliente finalizó conforme o agradeciendo la atención, el tNPS global DEBE situarse en PROMOTOR (9-10) o excepcionalmente NEUTRO (7-8) solo si el trámite requiere espera técnica prolongada. ¡Bajo ninguna circunstancia clasifiques a un cliente conforme o agradecido como DETRACTOR!
+  4. Zona constructiva en OJT (Neutros 7-8): Un Neutro (7-8) es un "Casi Promotor" donde la gestión quedó inconclusa o el cliente se mostró apático. Explica en 'camino_a_promotor' qué detalle puntual lo convertiría en 9 o 10.
+  5. Reserva DETRACTOR (0-6) únicamente cuando hubo un quiebre grave originado directamente por el asesor (maltrato, tono cortante, colgar intencionalmente, desinformación o abandono) o un reclamo no resuelto con frustración explícita.
+  6. El campo 'clasificacion' DEBE ser exactamente uno de estos tres valores en mayúsculas: 'PROMOTOR', 'NEUTRO' o 'DETRACTOR'.
 
 REGLA SUPREMA - TRANSCRIPCIÓN REAL Y VERÍDICA (ESTRICTAMENTE PROHIBIDO CONTENIDO GENÉRICO O PLANTILLAS):
 - Tu función fundamental es escuchar atentamente el archivo de audio adjunto y transcribir LITERALMENTE lo que se habla en la grabación real.
@@ -1139,6 +1141,34 @@ app.post('/api/analyze-call', async (req, res) => {
           politica_privacidad: true
         };
 
+        // Normalize tNPS Predictivo
+        const rawNps = parsed.nps_pronostico || {};
+        let npsScore = typeof rawNps.score === 'number' ? Math.round(rawNps.score) : 8;
+        const rawClasif = String(rawNps.clasificacion || '').toUpperCase().trim();
+        const hasCriticalQuiebres = parsed.quiebres_atencion && Array.isArray(parsed.quiebres_atencion) && parsed.quiebres_atencion.some((q: any) => q.gravedad === 'CRITICO');
+
+        let npsClasif: 'PROMOTOR' | 'NEUTRO' | 'DETRACTOR' = 'NEUTRO';
+        if (npsScore >= 9 || rawClasif.includes('PROMOTOR') || rawClasif.includes('PROMOTER') || (!hasCriticalQuiebres && avgScore >= 80 && npsScore >= 7)) {
+          npsClasif = 'PROMOTOR';
+          if (npsScore < 9) npsScore = 9;
+        } else if (npsScore <= 6 || rawClasif.includes('DETRACTOR')) {
+          npsClasif = 'DETRACTOR';
+          if (npsScore > 6) npsScore = 4;
+        } else {
+          npsClasif = 'NEUTRO';
+        }
+
+        const normalizedNpsPronostico = {
+          score: npsScore,
+          score_agente: typeof rawNps.score_agente === 'number' ? rawNps.score_agente : (npsClasif === 'PROMOTOR' ? 10 : 8),
+          clasificacion: npsClasif,
+          pregunta: rawNps.pregunta || '¿Qué tan probable es que recomiendes Claro a un amigo o familiar?',
+          escala: rawNps.escala || 'Escala oficial de 0 a 10 (Donde 0 es "Nada probable" y 10 es "Muy probable")',
+          justificacion: rawNps.justificacion || (npsClasif === 'PROMOTOR' ? 'Atención empática y resolutiva que impulsa la recomendación favorable.' : 'Evaluación de satisfacción tNPS predictiva.'),
+          factor_marca_vs_agente: rawNps.factor_marca_vs_agente || '',
+          camino_a_promotor: rawNps.camino_a_promotor || ''
+        };
+
         const completeRecord = {
           id: `call-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
           codigo_llamada: `REC-2026-CHILE-${Math.floor(1000 + Math.random() * 9000)}`,
@@ -1151,10 +1181,11 @@ app.post('/api/analyze-call', async (req, res) => {
           cola_atencion: queue,
           duracion_total: formatSeconds(parsed.silencio_analisis?.duracion_total_segundos || 420),
           duracion_segundos: parsed.silencio_analisis?.duracion_total_segundos || 420,
-          qa_score_global: avgScore,
           sentimiento_label: parsed.sentimiento_score > 0.2 ? 'Positivo' : parsed.sentimiento_score < -0.2 ? 'Negativo' : 'Neutro',
           modelo_procesado: model,
           ...parsed,
+          qa_score_global: avgScore,
+          nps_pronostico: normalizedNpsPronostico,
           cumplimiento_guion: normalizedCumplimientoGuion,
           segmentos: normalizedSegmentos,
           transcripcion: {

@@ -16,7 +16,7 @@ import {
   ChevronRight,
   UserCheck
 } from 'lucide-react';
-import { CallRecord } from '../types';
+import { CallRecord, getNormalizedNPS } from '../types';
 import { OjtDiagnosisCard } from './OjtDiagnosisCard';
 
 interface CallsExplorerViewProps {
@@ -60,18 +60,20 @@ export const CallsExplorerView: React.FC<CallsExplorerViewProps> = ({
   // Counts for quick chips
   const tutorCount = useMemo(() => calls.filter((c) => c.diagnostico_ojt?.requiere_intervencion_tutor).length, [calls]);
   const quiebresCount = useMemo(() => calls.filter((c) => c.quiebres_atencion && c.quiebres_atencion.length > 0).length, [calls]);
-  const detractorCount = useMemo(() => calls.filter((c) => c.nps_pronostico?.clasificacion === 'DETRACTOR').length, [calls]);
-  const promotorCount = useMemo(() => calls.filter((c) => c.nps_pronostico?.clasificacion === 'PROMOTOR').length, [calls]);
+  const detractorCount = useMemo(() => calls.filter((c) => getNormalizedNPS(c.nps_pronostico, c.qa_score_global) === 'DETRACTOR').length, [calls]);
+  const promotorCount = useMemo(() => calls.filter((c) => getNormalizedNPS(c.nps_pronostico, c.qa_score_global) === 'PROMOTOR').length, [calls]);
   const listoCount = useMemo(() => calls.filter((c) => c.diagnostico_ojt?.nivel_madurez === 'LISTO_PRODUCCION').length, [calls]);
 
   const filteredCalls = useMemo(() => {
     return calls
       .filter((c) => {
+        const normalizedNPS = getNormalizedNPS(c.nps_pronostico, c.qa_score_global);
+
         // Quick filter pill
         if (quickFilter === 'tutor' && !c.diagnostico_ojt?.requiere_intervencion_tutor) return false;
         if (quickFilter === 'quiebres' && (!c.quiebres_atencion || c.quiebres_atencion.length === 0)) return false;
-        if (quickFilter === 'detractor' && c.nps_pronostico?.clasificacion !== 'DETRACTOR') return false;
-        if (quickFilter === 'promotor' && c.nps_pronostico?.clasificacion !== 'PROMOTOR') return false;
+        if (quickFilter === 'detractor' && normalizedNPS !== 'DETRACTOR') return false;
+        if (quickFilter === 'promotor' && normalizedNPS !== 'PROMOTOR') return false;
         if (quickFilter === 'listo' && c.diagnostico_ojt?.nivel_madurez !== 'LISTO_PRODUCCION') return false;
 
         const matchesSearch =
@@ -88,7 +90,7 @@ export const CallsExplorerView: React.FC<CallsExplorerViewProps> = ({
 
         const matchesQueue = selectedQueue === 'all' || c.cola_atencion === selectedQueue;
         const matchesSentiment = selectedSentiment === 'all' || c.sentimiento_label === selectedSentiment;
-        const matchesNPS = selectedNPS === 'all' || c.nps_pronostico?.clasificacion === selectedNPS;
+        const matchesNPS = selectedNPS === 'all' || normalizedNPS === selectedNPS;
         const matchesCategory = selectedCategory === 'all' || c.motivo_categoria === selectedCategory;
         const matchesQA = c.qa_score_global >= minQA;
 
@@ -378,7 +380,7 @@ export const CallsExplorerView: React.FC<CallsExplorerViewProps> = ({
                     className="cursor-pointer py-3.5 px-4 hover:text-[#1A73E8]"
                   >
                     <div className="flex items-center gap-1">
-                      <span>QA Score</span>
+                      <span>Calidad QA (0-100%)</span>
                       <ArrowUpDown className="h-3 w-3" />
                     </div>
                   </th>
@@ -390,7 +392,7 @@ export const CallsExplorerView: React.FC<CallsExplorerViewProps> = ({
                     className="cursor-pointer py-3.5 px-4 hover:text-[#1A73E8]"
                   >
                     <div className="flex items-center gap-1">
-                      <span>NPS Predictivo</span>
+                      <span>tNPS Predicho (0-10)</span>
                       <ArrowUpDown className="h-3 w-3" />
                     </div>
                   </th>
@@ -473,31 +475,45 @@ export const CallsExplorerView: React.FC<CallsExplorerViewProps> = ({
                         </td>
 
                         <td className="py-3.5 px-4">
-                          <span
-                            className={`text-base font-extrabold ${
-                              call.qa_score_global >= 85
-                                ? 'text-[#34A853]'
-                                : call.qa_score_global >= 65
-                                ? 'text-[#FBBC05]'
-                                : 'text-[#EA4335]'
-                            }`}
-                          >
-                            {call.qa_score_global}%
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={`text-base font-extrabold ${
+                                call.qa_score_global >= 85
+                                  ? 'text-[#137333]'
+                                  : call.qa_score_global >= 65
+                                  ? 'text-[#B06000]'
+                                  : 'text-[#C5221F]'
+                              }`}
+                            >
+                              {call.qa_score_global}%
+                            </span>
+                          </div>
+                          <div className="text-[10px] font-medium text-[#5F6368]">Pauta de Calidad</div>
                         </td>
 
                         <td className="py-3.5 px-4">
-                          <span
-                            className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
-                              call.nps_pronostico?.clasificacion === 'DETRACTOR'
-                                ? 'bg-[#FCE8E6] text-[#EA4335]'
-                                : call.nps_pronostico?.clasificacion === 'PROMOTOR'
-                                ? 'bg-[#E6F4EA] text-[#137333]'
-                                : 'bg-[#FEF7E0] text-[#B06000]'
-                            }`}
-                          >
-                            {call.nps_pronostico?.score}/10 ({call.nps_pronostico?.clasificacion})
-                          </span>
+                          {(() => {
+                            const npsClasif = getNormalizedNPS(call.nps_pronostico, call.qa_score_global);
+                            const effectiveScore = typeof call.nps_pronostico?.score === 'number'
+                              ? (npsClasif === 'PROMOTOR' && call.nps_pronostico.score < 9 ? 9 : call.nps_pronostico.score)
+                              : (npsClasif === 'PROMOTOR' ? 9 : npsClasif === 'DETRACTOR' ? 3 : 7);
+                            return (
+                              <div>
+                                <span
+                                  className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-bold border ${
+                                    npsClasif === 'DETRACTOR'
+                                      ? 'bg-[#FCE8E6] text-[#C5221F] border-[#FAD2CF]'
+                                      : npsClasif === 'PROMOTOR'
+                                      ? 'bg-[#E6F4EA] text-[#137333] border-[#CEEAD6]'
+                                      : 'bg-[#FEF7E0] text-[#B06000] border-[#FEEFC3]'
+                                  }`}
+                                >
+                                  {effectiveScore}/10 • {npsClasif}
+                                </span>
+                                <div className="mt-0.5 text-[10px] text-[#80868B]">Satisfacción Cliente</div>
+                              </div>
+                            );
+                          })()}
                         </td>
 
                         <td className="py-3.5 px-4">
@@ -619,15 +635,23 @@ export const CallsExplorerView: React.FC<CallsExplorerViewProps> = ({
               </div>
               <div>
                 <span className="text-[10px] text-[#5F6368]">tNPS Pronóstico</span>
-                <p className={`text-base font-extrabold ${
-                  previewCall.nps_pronostico?.clasificacion === 'PROMOTOR'
-                    ? 'text-[#137333]'
-                    : previewCall.nps_pronostico?.clasificacion === 'NEUTRO'
-                    ? 'text-[#B06000]'
-                    : 'text-[#EA4335]'
-                }`}>
-                  {previewCall.nps_pronostico?.score}/10
-                </p>
+                {(() => {
+                  const npsClasif = getNormalizedNPS(previewCall.nps_pronostico, previewCall.qa_score_global);
+                  const effectiveScore = typeof previewCall.nps_pronostico?.score === 'number'
+                    ? (npsClasif === 'PROMOTOR' && previewCall.nps_pronostico.score < 9 ? 9 : previewCall.nps_pronostico.score)
+                    : (npsClasif === 'PROMOTOR' ? 9 : npsClasif === 'DETRACTOR' ? 3 : 7);
+                  return (
+                    <p className={`text-base font-extrabold ${
+                      npsClasif === 'PROMOTOR'
+                        ? 'text-[#137333]'
+                        : npsClasif === 'NEUTRO'
+                        ? 'text-[#B06000]'
+                        : 'text-[#EA4335]'
+                    }`}>
+                      {effectiveScore}/10 ({npsClasif})
+                    </p>
+                  );
+                })()}
               </div>
             </div>
 

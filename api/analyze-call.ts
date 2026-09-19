@@ -195,6 +195,37 @@ const callAnalysisSchema = {
   ]
 };
 
+function normalizeCallRecordNPS(parsed: any, avgScore: number) {
+  const rawNps = parsed.nps_pronostico || {};
+  let score = typeof rawNps.score === 'number' ? Math.round(rawNps.score) : null;
+  const rawClasif = String(rawNps.clasificacion || '').toUpperCase().trim();
+  const hasCriticalQuiebres = parsed.quiebres_atencion && Array.isArray(parsed.quiebres_atencion) && parsed.quiebres_atencion.some((q: any) => q.gravedad === 'CRITICO');
+
+  let clasificacion: 'PROMOTOR' | 'NEUTRO' | 'DETRACTOR' = 'NEUTRO';
+
+  if ((score !== null && score >= 9) || rawClasif.includes('PROMOTOR') || rawClasif.includes('PROMOTER') || (!hasCriticalQuiebres && avgScore >= 80 && (score === null || score >= 7))) {
+    clasificacion = 'PROMOTOR';
+    if (score === null || score < 9) score = 9;
+  } else if ((score !== null && score <= 6) || rawClasif.includes('DETRACTOR')) {
+    clasificacion = 'DETRACTOR';
+    if (score === null || score > 6) score = 4;
+  } else {
+    clasificacion = 'NEUTRO';
+    if (score === null) score = 7;
+  }
+
+  return {
+    score,
+    score_agente: typeof rawNps.score_agente === 'number' ? rawNps.score_agente : (clasificacion === 'PROMOTOR' ? 10 : 8),
+    clasificacion,
+    pregunta: rawNps.pregunta || '¿Qué tan probable es que recomiendes Claro a un amigo o familiar? Considerando una escala de 0 a 10, donde 0 es "Nada probable" y 10 es "Muy probable"',
+    escala: rawNps.escala || 'Escala oficial de 0 a 10 (Donde 0 es "Nada probable" y 10 es "Muy probable")',
+    justificacion: rawNps.justificacion || (clasificacion === 'PROMOTOR' ? 'Atención empática y resolutiva que impulsa la recomendación favorable.' : 'Evaluación de satisfacción tNPS predictiva.'),
+    factor_marca_vs_agente: rawNps.factor_marca_vs_agente || '',
+    camino_a_promotor: rawNps.camino_a_promotor || ''
+  };
+}
+
 // Groq Ultra-Fast Speech-to-Text & QA Engine
 async function analyzeWithGroq(
   groqKey: string,
@@ -390,10 +421,11 @@ Responde ÚNICAMENTE con un JSON válido que contenga la estructura exacta solic
     cola_atencion: queue,
     duracion_total: formatSeconds(parsed.silencio_analisis?.duracion_total_segundos || durationSec),
     duracion_segundos: parsed.silencio_analisis?.duracion_total_segundos || durationSec,
-    qa_score_global: avgScore,
     sentimiento_label: (parsed.sentimiento_score ?? 0) > 0.2 ? 'Positivo' : (parsed.sentimiento_score ?? 0) < -0.2 ? 'Negativo' : 'Neutro',
     modelo_procesado: 'Groq (Whisper-Large-v3 + Llama-3.3-70b)',
     ...parsed,
+    qa_score_global: avgScore,
+    nps_pronostico: normalizeCallRecordNPS(parsed, avgScore),
     segmentos: finalSegments,
     transcripcion: {
       segmentos: finalSegments
@@ -458,7 +490,11 @@ VALIDACIÓN DE GUION INSTITUCIONAL CHILENO:
 AUDITORÍA DE CALIDAD Y SPEECH ANALYTICS (CLARO CHILE):
 1. Evalúa los 5 criterios de calidad de 0 a 100: Amabilidad/Empatía, Seguridad al expresarse, Claridad de información, Tiempos de espera (hold), y Eficiencia TMO con diagnósticos descriptivos.
 2. Identifica los QUIEBRES de los asesores a nivel de atención.
-3. Pronóstico de NPS con la pregunta oficial Claro y clasificación DETRACTOR, NEUTRO o PROMOTOR.
+3. Pronóstico de NPS con la pregunta oficial Claro y clasificación DETRACTOR, NEUTRO o PROMOTOR:
+   - REGLA DE ORO PROMOTORES (9-10): Si la llamada tuvo buena atención (QA Score >= 80%), el requerimiento fue resuelto o atendido cordialmente, y el cliente finaliza tranquilo o agradeciendo ("gracias", "muy amable", "se pasó"), el pronóstico tNPS DEBE ser clasificado OBLIGATORIAMENTE como 'PROMOTOR' con nota 9 o 10. ¡No dejes en Neutro llamadas con buen servicio!
+   - Clasifica 'NEUTRO' (7-8) únicamente si la gestión quedó a medias o el cliente se mantuvo apático sin manifestar agradecimiento.
+   - Clasifica 'DETRACTOR' (0-6) solo si hubo quiebre grave atribuible al asesor o queja no resuelta con frustración.
+   - El campo 'clasificacion' DEBE ser exactamente: 'PROMOTOR', 'NEUTRO' o 'DETRACTOR'.
 4. Tiempo de Silencio Conversacional con el agente.
 5. Plan de coaching y feedback accionable para el asesor.`;
 
@@ -554,10 +590,11 @@ AUDITORÍA DE CALIDAD Y SPEECH ANALYTICS (CLARO CHILE):
               cola_atencion: queue,
               duracion_total: formatSeconds(parsed.silencio_analisis?.duracion_total_segundos || 420),
               duracion_segundos: parsed.silencio_analisis?.duracion_total_segundos || 420,
-              qa_score_global: avgScore,
               sentimiento_label: parsed.sentimiento_score > 0.2 ? 'Positivo' : parsed.sentimiento_score < -0.2 ? 'Negativo' : 'Neutro',
               modelo_procesado: model,
               ...parsed,
+              qa_score_global: avgScore,
+              nps_pronostico: normalizeCallRecordNPS(parsed, avgScore),
               segmentos: normalizedSegmentos,
               transcripcion: {
                 segmentos: normalizedSegmentos

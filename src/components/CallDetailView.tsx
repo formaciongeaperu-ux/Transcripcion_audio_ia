@@ -28,7 +28,7 @@ import {
   ChevronRight,
   GraduationCap
 } from 'lucide-react';
-import { CallRecord, SegmentoDialogo, QuiebreAtencion } from '../types';
+import { CallRecord, SegmentoDialogo, QuiebreAtencion, getNormalizedNPS } from '../types';
 import { RadarChart } from './RadarChart';
 import { ComplianceAuditCard } from './ComplianceAuditCard';
 import { OjtDiagnosisCard } from './OjtDiagnosisCard';
@@ -128,11 +128,14 @@ export const CallDetailView: React.FC<CallDetailViewProps> = ({
     );
   });
 
-  // Scoring helpers
-  const npsScore = call.nps_pronostico?.score ?? 0;
-  const isDetractor = call.nps_pronostico?.clasificacion === 'DETRACTOR';
-  const isPromotor = call.nps_pronostico?.clasificacion === 'PROMOTOR';
-  const isNeutro = call.nps_pronostico?.clasificacion === 'NEUTRO';
+  // Scoring helpers (Normalized)
+  const normalizedClasif = getNormalizedNPS(call.nps_pronostico, call.qa_score_global);
+  const npsScore = typeof call.nps_pronostico?.score === 'number'
+    ? (normalizedClasif === 'PROMOTOR' && call.nps_pronostico.score < 9 ? 9 : call.nps_pronostico.score)
+    : (normalizedClasif === 'PROMOTOR' ? 9 : normalizedClasif === 'DETRACTOR' ? 3 : 7);
+  const isDetractor = normalizedClasif === 'DETRACTOR';
+  const isPromotor = normalizedClasif === 'PROMOTOR';
+  const isNeutro = normalizedClasif === 'NEUTRO';
 
   return (
     <div className="flex flex-col gap-6 pb-16">
@@ -419,7 +422,7 @@ export const CallDetailView: React.FC<CallDetailViewProps> = ({
             >
               <AlertCircle className="h-4 w-4" />
               <span>
-                tNPS GENERAL: {call.nps_pronostico?.clasificacion} ({npsScore}/10)
+                tNPS GENERAL: {normalizedClasif} ({npsScore}/10)
               </span>
             </div>
           </div>

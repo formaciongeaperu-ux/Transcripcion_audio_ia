@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import { CallRecord } from '../types';
+import { CallRecord, getNormalizedNPS } from '../types';
 
 export function exportCallsToExcel(calls: CallRecord[], fileName: string = 'Reporte_Auditoria_Speech_Analytics_Claro.xlsx') {
   // Main calls sheet data
@@ -22,8 +22,10 @@ export function exportCallsToExcel(calls: CallRecord[], fileName: string = 'Repo
     '% Silencio Conversacional': `${c.silencio_analisis?.porcentaje_silencio ?? 0}%`,
     'Nivel de Silencio': c.silencio_analisis?.nivel_silencio ?? 'MODERADO',
     'QA Score Global': `${c.qa_score_global}%`,
-    'Probable NPS (0-10)': c.nps_pronostico?.score ?? 0,
-    'Clasificación NPS': c.nps_pronostico?.clasificacion ?? 'NEUTRO',
+    'Probable NPS (0-10)': typeof c.nps_pronostico?.score === 'number'
+      ? (getNormalizedNPS(c.nps_pronostico, c.qa_score_global) === 'PROMOTOR' && c.nps_pronostico.score < 9 ? 9 : c.nps_pronostico.score)
+      : (getNormalizedNPS(c.nps_pronostico, c.qa_score_global) === 'PROMOTOR' ? 9 : 7),
+    'Clasificación NPS': getNormalizedNPS(c.nps_pronostico, c.qa_score_global),
     'Pregunta NPS': c.nps_pronostico?.pregunta ?? '¿Qué tan probable es que recomiendes Claro a un amigo o familiar?',
     'Justificación NPS (IA)': c.nps_pronostico?.justificacion ?? '',
     'CSAT Estimado': c.csat_estimado,
@@ -124,8 +126,10 @@ export function exportCallsToCSV(calls: CallRecord[], fileName: string = 'Audito
     c.silencio_analisis?.silencio_agente_segundos ?? 0,
     `"${c.silencio_analisis?.porcentaje_silencio ?? 0}%"`,
     c.qa_score_global,
-    c.nps_pronostico?.score ?? 0,
-    `"${c.nps_pronostico?.clasificacion ?? 'NEUTRO'}"`,
+    typeof c.nps_pronostico?.score === 'number'
+      ? (getNormalizedNPS(c.nps_pronostico, c.qa_score_global) === 'PROMOTOR' && c.nps_pronostico.score < 9 ? 9 : c.nps_pronostico.score)
+      : (getNormalizedNPS(c.nps_pronostico, c.qa_score_global) === 'PROMOTOR' ? 9 : 7),
+    `"${getNormalizedNPS(c.nps_pronostico, c.qa_score_global)}"`,
     c.csat_estimado,
     `"${c.sentimiento_label}"`,
     c.resolucion_primer_contacto ? 'SI' : 'NO',
