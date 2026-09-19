@@ -11,7 +11,6 @@ import {
   Play,
   Gauge,
   Target,
-  UploadCloud,
   Lightbulb,
   Globe
 } from 'lucide-react';
@@ -223,24 +222,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               Consolidado de <strong className="text-[#202124]">{totalCalls} llamadas auditadas</strong> con Gemini AI · Operación Claro Chile
             </p>
           </div>
-        </div>
-
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={onOpenUpload}
-            className="flex items-center gap-2 rounded-xl border border-[#DADCE0] bg-white px-4 py-2 text-xs font-semibold text-[#202124] shadow-xs transition hover:bg-[#F8F9FA]"
-          >
-            <UploadCloud className="h-4 w-4 text-[#5F6368]" />
-            <span>Cargar Audios</span>
-          </button>
-
-          <button
-            onClick={onOpenUpload}
-            className="flex items-center gap-2 rounded-xl bg-[#0B192C] px-4 py-2 text-xs font-semibold text-white shadow-xs transition hover:bg-[#1E293B]"
-          >
-            <Plus className="h-4 w-4" strokeWidth={2.5} />
-            <span>Analizar Audios</span>
-          </button>
         </div>
       </div>
 
