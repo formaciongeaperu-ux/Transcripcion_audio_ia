@@ -1,10 +1,10 @@
 /**
- * In-browser Audio Optimizer using Pure JS & Web Audio API
- * Direct PCM/WAV downsampler to 16,000 Hz 16-bit Mono WAV
- * Reduces bandwidth by 70-85% while guaranteeing 100% compliance with Vercel serverless payload limits.
+ * In-browser Audio Optimizer using Web Audio API
+ * Downsamples any audio file (.mp3, .wav, .m4a, .ogg) to 16,000 Hz 16-bit Mono WAV
+ * This saves ~80% network bandwidth while preserving optimal speech clarity for Gemini AI models.
  */
 
-import { inspectWavHeader, WavMetadata, ALAW_TABLE, MULAW_TABLE } from './telephonyAudio';
+import { normalizeAudioForPlayback } from './telephonyAudio';
 
 export interface AudioOptimizationResult {
   originalSize: number;
@@ -26,128 +26,6 @@ export async function downsampleTo16kHzMonoWav(file: File | Blob): Promise<{ bas
   };
 }
 
-/**
- * Pure JavaScript WAV parser for direct, zero-dependency sample extraction
- */
-function decodeWavDirectly(buffer: ArrayBuffer, meta: WavMetadata): { samples: Float32Array; sourceSampleRate: number } | null {
-  if (!meta.isWav) return null;
-  const view = new DataView(buffer);
-  const dataOffset = meta.dataOffset;
-  const dataLength = meta.dataLength || (buffer.byteLength - dataOffset);
-  const channels = meta.numChannels || 1;
-  const bits = meta.bitsPerSample || 16;
-  const format = meta.audioFormat;
-  const sourceSampleRate = meta.sampleRate || 8000;
-
-  // G.711 A-law
-  if (format === 6) {
-    const raw = new Uint8Array(buffer, dataOffset, dataLength);
-    const numFrames = Math.floor(raw.length / channels);
-    const samples = new Float32Array(numFrames);
-    for (let i = 0; i < numFrames; i++) {
-      let sum = 0;
-      for (let ch = 0; ch < channels; ch++) {
-        sum += ALAW_TABLE[raw[i * channels + ch]];
-      }
-      samples[i] = (sum / channels) / 32768;
-    }
-    return { samples, sourceSampleRate };
-  }
-
-  // G.711 µ-law
-  if (format === 7) {
-    const raw = new Uint8Array(buffer, dataOffset, dataLength);
-    const numFrames = Math.floor(raw.length / channels);
-    const samples = new Float32Array(numFrames);
-    for (let i = 0; i < numFrames; i++) {
-      let sum = 0;
-      for (let ch = 0; ch < channels; ch++) {
-        sum += MULAW_TABLE[raw[i * channels + ch]];
-      }
-      samples[i] = (sum / channels) / 32768;
-    }
-    return { samples, sourceSampleRate };
-  }
-
-  // Standard Linear PCM
-  if (format === 1) {
-    if (bits === 16) {
-      const numSamples = Math.floor(dataLength / 2);
-      const numFrames = Math.floor(numSamples / channels);
-      const samples = new Float32Array(numFrames);
-      for (let i = 0; i < numFrames; i++) {
-        let sum = 0;
-        for (let ch = 0; ch < channels; ch++) {
-          const byteIdx = dataOffset + (i * channels + ch) * 2;
-          if (byteIdx + 1 < buffer.byteLength) {
-            sum += view.getInt16(byteIdx, true);
-          }
-        }
-        samples[i] = (sum / channels) / 32768;
-      }
-      return { samples, sourceSampleRate };
-    } else if (bits === 8) {
-      const numFrames = Math.floor(dataLength / channels);
-      const samples = new Float32Array(numFrames);
-      for (let i = 0; i < numFrames; i++) {
-        let sum = 0;
-        for (let ch = 0; ch < channels; ch++) {
-          const byteIdx = dataOffset + i * channels + ch;
-          if (byteIdx < buffer.byteLength) {
-            sum += (view.getUint8(byteIdx) - 128) / 128;
-          }
-        }
-        samples[i] = sum / channels;
-      }
-      return { samples, sourceSampleRate };
-    }
-  }
-
-  // 32-bit IEEE Float
-  if (format === 3) {
-    const numFrames = Math.floor(dataLength / (4 * channels));
-    const samples = new Float32Array(numFrames);
-    for (let i = 0; i < numFrames; i++) {
-      let sum = 0;
-      for (let ch = 0; ch < channels; ch++) {
-        const byteIdx = dataOffset + (i * channels + ch) * 4;
-        if (byteIdx + 3 < buffer.byteLength) {
-          sum += view.getFloat32(byteIdx, true);
-        }
-      }
-      samples[i] = sum / channels;
-    }
-    return { samples, sourceSampleRate };
-  }
-
-  return null;
-}
-
-/**
- * Fast linear interpolation resampler from sourceRate to targetRate
- */
-function resampleFloat32Mono(
-  sourceSamples: Float32Array,
-  sourceRate: number,
-  targetRate: number
-): Float32Array {
-  if (sourceRate === targetRate) return sourceSamples;
-  const ratio = sourceRate / targetRate;
-  const newLength = Math.max(1, Math.round(sourceSamples.length / ratio));
-  const result = new Float32Array(newLength);
-
-  for (let i = 0; i < newLength; i++) {
-    const origPos = i * ratio;
-    const index = Math.floor(origPos);
-    const frac = origPos - index;
-    const s1 = sourceSamples[index] || 0;
-    const s2 = sourceSamples[index + 1] || s1;
-    result[i] = s1 + frac * (s2 - s1);
-  }
-
-  return result;
-}
-
 export async function optimizeAudioInBrowser(
   file: File | Blob,
   targetSampleRate: number = 16000
@@ -155,114 +33,87 @@ export async function optimizeAudioInBrowser(
   const originalSize = file.size;
 
   try {
-    const arrayBuffer = await file.arrayBuffer();
-    const meta = inspectWavHeader(arrayBuffer);
+    // 1. First normalize telephony formats (G.711 A-law / µ-law) to standard PCM WAV
+    const normalized = await normalizeAudioForPlayback(file);
+    const audioBlobToDecode = normalized.blob;
+    const arrayBuffer = await audioBlobToDecode.arrayBuffer();
 
-    // 1. Direct Pure JS WAV decoding (100% reliable for all Contact Center WAV recordings)
-    if (meta.isWav) {
-      const directDecoded = decodeWavDirectly(arrayBuffer, meta);
-      if (directDecoded && directDecoded.samples.length > 0) {
-        const durationSeconds = directDecoded.samples.length / directDecoded.sourceSampleRate;
-        
-        // Adaptive parameters to strictly keep payload under 2.8 MB (Base64 < 3.8 MB) for Vercel 4.5MB limit
-        let effectiveRate = targetSampleRate;
-        let bits: 8 | 16 = 16;
-        if (durationSeconds > 200) {
-          effectiveRate = 8000;
-          bits = 8;
-        } else if (durationSeconds > 80) {
-          effectiveRate = 8000;
-          bits = 16;
-        } else {
-          effectiveRate = 16000;
-          bits = 16;
-        }
-
-        const resampled = resampleFloat32Mono(
-          directDecoded.samples,
-          directDecoded.sourceSampleRate,
-          effectiveRate
-        );
-        const wavBlob = encodeWAV(resampled, effectiveRate, bits);
-        const optimizedSize = wavBlob.size;
-        const savingsPercentage = Math.max(0, Math.round(((originalSize - optimizedSize) / originalSize) * 100));
-        const base64Data = await blobToBase64(wavBlob);
-
-        return {
-          originalSize,
-          optimizedSize,
-          savingsPercentage,
-          durationSeconds,
-          sampleRate: effectiveRate,
-          channels: 1,
-          wavBlob,
-          base64Data
-        };
-      }
-    }
-
-    // 2. Web Audio API decoder for MP3 / OGG / M4A / WebM
+    // 2. Attempt decoding with browser AudioContext
     const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    if (AudioCtx) {
-      const audioContext = new AudioCtx();
-      let audioBuffer: AudioBuffer | null = null;
-      try {
-        audioBuffer = await audioContext.decodeAudioData(arrayBuffer.slice(0));
-      } catch {
-        audioBuffer = null;
-      } finally {
-        audioContext.close().catch(() => {});
-      }
+    const audioContext = new AudioCtx();
 
-      if (audioBuffer) {
-        const durationSeconds = audioBuffer.duration;
-        let effectiveRate = targetSampleRate;
-        let bits: 8 | 16 = 16;
-        if (durationSeconds > 200) {
-          effectiveRate = 8000;
-          bits = 8;
-        } else if (durationSeconds > 80) {
-          effectiveRate = 8000;
-          bits = 16;
-        } else {
-          effectiveRate = 16000;
-          bits = 16;
-        }
+    let audioBuffer: AudioBuffer | null = null;
+    try {
+      audioBuffer = await audioContext.decodeAudioData(arrayBuffer.slice(0));
+    } catch (decodeErr) {
+      console.warn('Browser AudioContext could not decode directly. Delegating to server ffmpeg transcoding:', decodeErr);
+      audioBuffer = null;
+    } finally {
+      audioContext.close().catch(() => {});
+    }
 
-        const offlineCtx = new OfflineAudioContext(
-          1, // mono
-          Math.max(1, Math.ceil(durationSeconds * effectiveRate)),
-          effectiveRate
-        );
+    // 3. If browser successfully decoded, render high quality 16kHz Mono WAV
+    if (audioBuffer) {
+      const durationSeconds = audioBuffer.duration;
+      const offlineCtx = new OfflineAudioContext(
+        1, // mono channel
+        Math.max(1, Math.ceil(durationSeconds * targetSampleRate)),
+        targetSampleRate
+      );
 
-        const source = offlineCtx.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(offlineCtx.destination);
-        source.start(0);
+      const source = offlineCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(offlineCtx.destination);
+      source.start(0);
 
-        const renderedBuffer = await offlineCtx.startRendering();
-        const monoChannelData = renderedBuffer.getChannelData(0);
+      const renderedBuffer = await offlineCtx.startRendering();
+      const monoChannelData = renderedBuffer.getChannelData(0);
 
-        const wavBlob = encodeWAV(monoChannelData, effectiveRate, bits);
-        const optimizedSize = wavBlob.size;
-        const savingsPercentage = Math.max(0, Math.round(((originalSize - optimizedSize) / originalSize) * 100));
-        const base64Data = await blobToBase64(wavBlob);
+      const wavBlob = encodeWAV(monoChannelData, targetSampleRate);
+      const optimizedSize = wavBlob.size;
+      const savingsPercentage = Math.max(0, Math.round(((originalSize - optimizedSize) / originalSize) * 100));
+      const base64Data = await blobToBase64(wavBlob);
 
+      return {
+        originalSize,
+        optimizedSize,
+        savingsPercentage,
+        durationSeconds,
+        sampleRate: targetSampleRate,
+        channels: 1,
+        wavBlob,
+        base64Data
+      };
+    }
+
+    // 4. If browser decode failed (e.g. GSM 6.10, ADPCM, non-standard codecs), use server ffmpeg
+    const originalBase64 = await blobToBase64(file);
+    try {
+      const convRes = await fetch('/api/convert-audio', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audioBase64: originalBase64 })
+      });
+
+      if (convRes.ok) {
+        const convertedBlob = await convRes.blob();
+        const base64Data = await blobToBase64(convertedBlob);
         return {
           originalSize,
-          optimizedSize,
-          savingsPercentage,
-          durationSeconds,
-          sampleRate: effectiveRate,
+          optimizedSize: convertedBlob.size,
+          savingsPercentage: Math.max(0, Math.round(((originalSize - convertedBlob.size) / originalSize) * 100)),
+          durationSeconds: 0,
+          sampleRate: targetSampleRate,
           channels: 1,
-          wavBlob,
+          wavBlob: convertedBlob,
           base64Data
         };
       }
+    } catch (serverConvErr) {
+      console.warn('Server conversion request failed:', serverConvErr);
     }
 
-    // 3. Fallback: encode original to base64
-    const originalBase64 = await blobToBase64(file);
+    // 5. If everything fails, preserve 100% of real audio data by returning original base64
     return {
       originalSize,
       optimizedSize: originalSize,
@@ -275,7 +126,7 @@ export async function optimizeAudioInBrowser(
     };
 
   } catch (error) {
-    console.error('Error during client-side audio optimization:', error);
+    console.error('Error during audio optimization, falling back to original audio:', error);
     const fallbackBase64 = await blobToBase64(file);
     return {
       originalSize,
@@ -290,15 +141,14 @@ export async function optimizeAudioInBrowser(
   }
 }
 
-function encodeWAV(samples: Float32Array, sampleRate: number, bitsPerSample: number = 16): Blob {
-  const bytesPerSample = bitsPerSample === 8 ? 1 : 2;
-  const buffer = new ArrayBuffer(44 + samples.length * bytesPerSample);
+function encodeWAV(samples: Float32Array, sampleRate: number): Blob {
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
   const view = new DataView(buffer);
 
   /* RIFF identifier */
   writeString(view, 0, 'RIFF');
   /* file length */
-  view.setUint32(4, 36 + samples.length * bytesPerSample, true);
+  view.setUint32(4, 36 + samples.length * 2, true);
   /* RIFF type */
   writeString(view, 8, 'WAVE');
   /* format chunk identifier */
@@ -312,28 +162,21 @@ function encodeWAV(samples: Float32Array, sampleRate: number, bitsPerSample: num
   /* sample rate */
   view.setUint32(24, sampleRate, true);
   /* byte rate (sample rate * block align) */
-  view.setUint32(28, sampleRate * bytesPerSample, true);
+  view.setUint32(28, sampleRate * 2, true);
   /* block align (channel count * bytes per sample) */
-  view.setUint16(32, bytesPerSample, true);
+  view.setUint16(32, 2, true);
   /* bits per sample */
-  view.setUint16(34, bitsPerSample, true);
+  view.setUint16(34, 16, true);
   /* data chunk identifier */
   writeString(view, 36, 'data');
   /* data chunk length */
-  view.setUint32(40, samples.length * bytesPerSample, true);
+  view.setUint32(40, samples.length * 2, true);
 
-  if (bitsPerSample === 8) {
-    let offset = 44;
-    for (let i = 0; i < samples.length; i++, offset++) {
-      const s = Math.max(-1, Math.min(1, samples[i]));
-      view.setUint8(offset, Math.floor((s + 1) * 127.5));
-    }
-  } else {
-    let offset = 44;
-    for (let i = 0; i < samples.length; i++, offset += 2) {
-      const s = Math.max(-1, Math.min(1, samples[i]));
-      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
-    }
+  // Write PCM samples (16-bit clamp)
+  let offset = 44;
+  for (let i = 0; i < samples.length; i++, offset += 2) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
   }
 
   return new Blob([view], { type: 'audio/wav' });

@@ -7,7 +7,6 @@ import {
   AlertCircle, 
   Loader2, 
   Sliders, 
-  Sparkles, 
   Trash2, 
   Zap,
   ArrowRight,
@@ -35,9 +34,9 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   const [concurrency, setConcurrency] = useState<number>(3);
   const [optimizeAudio, setOptimizeAudio] = useState<boolean>(true);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
-  const [agentId, setAgentId] = useState<string>('AG-4029');
-  const [agentName, setAgentName] = useState<string>('Asesor Claro');
-  const [queueName, setQueueName] = useState<string>('Exclusivo Postpago Chile');
+  const [overallProgress, setOverallProgress] = useState<number>(0);
+  const [agentName, setAgentName] = useState('Asesor Claro');
+  const [queueName, setQueueName] = useState('Exclusivo Postpago Chile');
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -143,25 +142,12 @@ export const UploadModal: React.FC<UploadModalProps> = ({
             audioBase64: processedBase64,
             mimeType: 'audio/wav',
             fileName: item.file.name,
-            agentId: agentId.trim() || undefined,
-            agentName: agentName.trim() || undefined,
+            agentName,
             queue: queueName,
           }),
         });
 
-        const resText = await response.text();
-        let resData: any = {};
-        try {
-          resData = JSON.parse(resText);
-        } catch {
-          throw new Error(
-            response.status === 413
-              ? 'El audio excede el límite de carga de Vercel (máx 4.5MB). Usa optimización de audio.'
-              : response.status === 504
-              ? 'Tiempo de espera agotado al transcribir. Intenta con un audio más corto.'
-              : `Error del servidor (${response.status}): ${resText.slice(0, 100)}`
-          );
-        }
+        const resData = await response.json();
 
         if (response.ok && resData.success && resData.data) {
           const callData = resData.data as CallRecord;
@@ -176,12 +162,6 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           callData.audio_url = audioUrl;
           callData.audioFile = item.file;
           callData.file_name = item.file.name;
-          if (agentId.trim()) {
-            callData.agente_id = agentId.trim();
-          }
-          if (agentName.trim()) {
-            callData.agente_nombre = agentName.trim();
-          }
           completedCalls.push(callData);
 
           setItems((prev) =>
@@ -343,19 +323,9 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           </div>
 
           {/* Context Fields */}
-          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label className="text-[11px] font-bold text-[#5F6368]">ID / Código Asesor:</label>
-              <input
-                type="text"
-                value={agentId}
-                onChange={(e) => setAgentId(e.target.value)}
-                placeholder="Ej. AG-4029 o 748291"
-                className="mt-1 h-9 w-full rounded-xl border border-[#DADCE0] px-3 font-mono text-xs outline-none focus:border-[#1A73E8]"
-              />
-            </div>
-            <div>
-              <label className="text-[11px] font-bold text-[#5F6368]">Nombre Asesor:</label>
+              <label className="text-[11px] font-bold text-[#5F6368]">Asesor Asignado:</label>
               <input
                 type="text"
                 value={agentName}
@@ -533,7 +503,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                 </>
               ) : (
                 <>
-                  <Sparkles className="h-4 w-4" />
+                  <ShieldCheck className="h-4 w-4" strokeWidth={2} />
                   <span>Comenzar Auditoría ({items.length})</span>
                 </>
               )}

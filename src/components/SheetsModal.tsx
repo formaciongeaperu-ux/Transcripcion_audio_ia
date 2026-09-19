@@ -11,7 +11,9 @@ import {
   DownloadCloud,
   UploadCloud,
   Database,
-  Link2
+  Link2,
+  FolderSync,
+  HardDrive
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import {
@@ -28,6 +30,10 @@ import {
   extractSpreadsheetId,
   SpreadsheetInfo
 } from '../services/sheetsService';
+import {
+  getOrCreateAudioFolder,
+  DriveFolderInfo
+} from '../services/driveService';
 import { CallRecord } from '../types';
 
 interface SheetsModalProps {
@@ -39,6 +45,10 @@ interface SheetsModalProps {
   onUpdateConnectedSpreadsheet: (info: SpreadsheetInfo | null) => void;
   autoSyncEnabled: boolean;
   onToggleAutoSync: (enabled: boolean) => void;
+  connectedDriveFolder?: DriveFolderInfo | null;
+  onUpdateConnectedDriveFolder?: (info: DriveFolderInfo | null) => void;
+  autoUploadDrive?: boolean;
+  onToggleAutoUploadDrive?: (enabled: boolean) => void;
 }
 
 export const SheetsModal: React.FC<SheetsModalProps> = ({
@@ -49,7 +59,11 @@ export const SheetsModal: React.FC<SheetsModalProps> = ({
   connectedSpreadsheet,
   onUpdateConnectedSpreadsheet,
   autoSyncEnabled,
-  onToggleAutoSync
+  onToggleAutoSync,
+  connectedDriveFolder,
+  onUpdateConnectedDriveFolder,
+  autoUploadDrive = true,
+  onToggleAutoUploadDrive
 }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isSigningIn, setIsSigningIn] = useState(false);
@@ -239,6 +253,33 @@ export const SheetsModal: React.FC<SheetsModalProps> = ({
     }
   };
 
+  const handleSetupDriveFolder = async () => {
+    setIsActionLoading(true);
+    setStatusMessage(null);
+    try {
+      const token = await getAccessToken();
+      if (!token) {
+        throw new Error('Debes conectar tu cuenta de Google primero.');
+      }
+      const folder = await getOrCreateAudioFolder(token);
+      if (onUpdateConnectedDriveFolder) {
+        onUpdateConnectedDriveFolder(folder);
+      }
+      setStatusMessage({
+        type: 'success',
+        text: `Carpeta "${folder.name}" conectada en Google Drive para almacenamiento de audios.`
+      });
+    } catch (err: any) {
+      console.error(err);
+      setStatusMessage({
+        type: 'error',
+        text: err?.message || 'Error al conectar carpeta en Google Drive.'
+      });
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-xs">
       <div className="relative w-full max-w-xl rounded-3xl border border-[#DADCE0] bg-white p-6 shadow-2xl transition-all sm:p-7">
@@ -250,10 +291,10 @@ export const SheetsModal: React.FC<SheetsModalProps> = ({
             </div>
             <div>
               <h2 className="font-['Google_Sans',sans-serif] text-lg font-bold text-[#202124]">
-                Base de Datos en Google Sheets
+                Base de Datos Google Sheets & Google Drive
               </h2>
               <p className="text-xs text-[#5F6368]">
-                Almacena y sincroniza todas tus auditorías y métricas directamente en tus hojas de cálculo
+                Almacena auditorías, métricas de 4 fases y grabaciones de audio en tu cuenta corporativa de Google
               </p>
             </div>
           </div>
@@ -480,6 +521,66 @@ export const SheetsModal: React.FC<SheetsModalProps> = ({
                   )}
                 </div>
               )}
+
+              {/* Step 3: Google Drive Folder for Audio Files */}
+              <div className="rounded-2xl border border-[#DADCE0] bg-white p-4 shadow-xs">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#E8F0FE] text-[#1A73E8]">
+                      <HardDrive className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-[#1A73E8]">
+                        Google Drive · Almacenamiento de Audios
+                      </span>
+                      <h4 className="font-['Google_Sans',sans-serif] text-sm font-bold text-[#202124]">
+                        {connectedDriveFolder ? connectedDriveFolder.name : 'Carpeta Centralizada de Grabaciones'}
+                      </h4>
+                    </div>
+                  </div>
+
+                  {connectedDriveFolder ? (
+                    <a
+                      href={connectedDriveFolder.webViewLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 rounded-full border border-[#DADCE0] px-3 py-1 text-xs font-semibold text-[#1A73E8] transition hover:bg-[#E8F0FE]"
+                    >
+                      <span>Abrir Carpeta</span>
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  ) : (
+                    <button
+                      onClick={handleSetupDriveFolder}
+                      disabled={isActionLoading}
+                      className="flex items-center gap-1.5 rounded-full bg-[#1A73E8] px-3.5 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-[#1557B0] disabled:opacity-50"
+                    >
+                      <FolderSync className="h-3.5 w-3.5" />
+                      <span>Conectar Carpeta</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[#F1F3F4] pt-3">
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={autoUploadDrive}
+                      onChange={(e) => onToggleAutoUploadDrive && onToggleAutoUploadDrive(e.target.checked)}
+                      className="h-4 w-4 rounded text-[#1A73E8] focus:ring-[#1A73E8]"
+                    />
+                    <span className="text-xs font-medium text-[#3C4043]">
+                      Subir audios analizados automáticamente a Google Drive
+                    </span>
+                  </label>
+
+                  {connectedDriveFolder && (
+                    <span className="rounded-full bg-[#E6F4EA] px-2.5 py-0.5 text-[10px] font-bold text-[#137333]">
+                      Sincronizado
+                    </span>
+                  )}
+                </div>
+              </div>
             </div>
           )}
         </div>

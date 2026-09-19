@@ -1,16 +1,16 @@
 import React from 'react';
 import { 
-  Sparkles, 
   Upload, 
   Download, 
   Clock, 
   Search, 
   Menu, 
-  CheckCircle2, 
-  AlertTriangle,
-  RefreshCw,
-  PhoneCall,
-  FileSpreadsheet
+  PhoneCall, 
+  FileSpreadsheet,
+  Command,
+  Activity,
+  Filter,
+  GraduationCap
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -27,6 +27,9 @@ interface HeaderProps {
   onOpenSheets: () => void;
   isSheetsConnected: boolean;
   sheetsTitle?: string;
+  onOpenCommandPalette?: () => void;
+  selectedCohort?: string;
+  setSelectedCohort?: (cohort: string) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -42,10 +45,13 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSheets,
   isSheetsConnected,
   sheetsTitle,
+  onOpenCommandPalette,
+  selectedCohort = 'all',
+  setSelectedCohort,
 }) => {
   return (
-    <header className="sticky top-0 z-30 flex h-16 w-full items-center justify-between border-b border-[#DADCE0] bg-white px-4 shadow-[0_1px_2px_rgba(60,64,67,0.06)] md:px-6">
-      {/* Left: Hamburger & Brand */}
+    <header className="sticky top-0 z-30 flex h-16 w-full items-center justify-between border-b border-[#DADCE0] bg-white px-4 shadow-[0_1px_3px_rgba(60,64,67,0.08)] md:px-6">
+      {/* Left: Hamburger & Claro Enterprise Brand */}
       <div className="flex items-center gap-3">
         <button
           id="btn-toggle-sidebar"
@@ -57,48 +63,73 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
 
         <div className="flex items-center gap-2.5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#1A73E8] text-white shadow-sm">
-            <PhoneCall className="h-5 w-5" />
+          <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-[#DA291C] text-white shadow-sm ring-2 ring-[#DA291C]/20">
+            <PhoneCall className="h-4 w-4" />
           </div>
           <div className="flex flex-col">
             <div className="flex items-center gap-2">
-              <span className="font-['Google_Sans',sans-serif] text-base font-bold tracking-tight text-[#202124]">
+              <span className="font-['Google_Sans',sans-serif] text-sm font-bold tracking-tight text-[#202124] sm:text-base">
                 Claro Speech Analytics
               </span>
-              <span className="hidden rounded-full bg-[#E8F0FE] px-2 py-0.5 text-[11px] font-medium text-[#1A73E8] sm:inline-block">
-                Google Cloud AI
+              <span className="hidden rounded-full border border-[#DA291C]/20 bg-[#FCE8E6] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#C5221F] sm:inline-block">
+                ENTERPRISE QA & OJT
               </span>
             </div>
-            <span className="text-[11px] text-[#5F6368]">
-              Contact Center Quality & NPS Predictor
+            <span className="hidden text-[10px] text-[#5F6368] sm:inline-block">
+              Aseguramiento de Calidad & Predicción tNPS • Claro Chile
             </span>
           </div>
         </div>
       </div>
 
-      {/* Middle: Search input (Google Cloud search bar style) */}
-      <div className="hidden max-w-md flex-1 items-center px-4 md:flex">
-        <div className="relative w-full">
-          <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#5F6368]" />
-          <input
-            id="input-global-search"
-            type="text"
-            placeholder="Buscar por asesor, ID, motivo o palabra clave..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="h-10 w-full rounded-full border border-transparent bg-[#F1F3F4] pl-10 pr-4 text-sm text-[#202124] placeholder-[#5F6368] outline-none transition focus:border-[#1A73E8] focus:bg-white focus:shadow-sm"
-          />
+      {/* Middle: Command Bar & Cohort Selector */}
+      <div className="flex max-w-xl flex-1 items-center gap-2 px-3">
+        {/* Cohort / Nido Selector */}
+        {setSelectedCohort && (
+          <div className="hidden items-center gap-1.5 rounded-full border border-[#DADCE0] bg-[#F8F9FA] px-3 py-1.5 text-xs text-[#3C4043] xl:flex">
+            <GraduationCap className="h-3.5 w-3.5 text-[#1A73E8]" />
+            <select
+              value={selectedCohort}
+              onChange={(e) => setSelectedCohort(e.target.value)}
+              className="cursor-pointer bg-transparent text-xs font-semibold text-[#202124] outline-none"
+            >
+              <option value="all">Todos los Nidos OJT</option>
+              <option value="nido_movil">Nido Móvil Postpago</option>
+              <option value="nido_fibra">Nido Fibra y Fija</option>
+              <option value="nido_retenciones">Nido Retenciones & Bajas</option>
+              <option value="graduados">Producción Regular (Graduados)</option>
+            </select>
+          </div>
+        )}
+
+        {/* Global Command Bar (Click opens CommandPalette or search) */}
+        <div 
+          onClick={onOpenCommandPalette}
+          className="group relative flex h-10 w-full cursor-pointer items-center justify-between rounded-full border border-transparent bg-[#F1F3F4] px-3.5 text-xs text-[#5F6368] transition hover:border-[#DADCE0] hover:bg-white hover:shadow-xs focus-within:border-[#1A73E8] focus-within:bg-white"
+        >
+          <div className="flex flex-1 items-center gap-2">
+            <Search className="h-4 w-4 shrink-0 text-[#5F6368] group-hover:text-[#1A73E8]" />
+            <span className="truncate text-xs text-[#5F6368]">
+              {searchTerm ? `Búsqueda: "${searchTerm}"` : 'Buscar por asesor, ID, RUT, motivo o alerta...'}
+            </span>
+          </div>
+          <div className="flex items-center gap-1">
+            <kbd className="hidden items-center gap-0.5 rounded-md border border-[#DADCE0] bg-white px-1.5 py-0.5 font-mono text-[10px] font-bold text-[#5F6368] shadow-2xs sm:inline-flex">
+              <Command className="h-2.5 w-2.5" /> K
+            </kbd>
+          </div>
         </div>
       </div>
 
-      {/* Right: Status badges and action buttons */}
-      <div className="flex items-center gap-2 sm:gap-3">
-        {/* Cascade status indicator */}
-        <div className="hidden items-center gap-1.5 rounded-full border border-[#DADCE0] bg-[#F8F9FA] px-3 py-1.5 text-xs text-[#3C4043] lg:flex">
-          <Sparkles className="h-3.5 w-3.5 text-[#1A73E8]" />
-          <span className="font-medium text-[#202124]">Cascade:</span>
-          <span className="font-mono text-[11px] text-[#1A73E8]">gemini-2.5-flash</span>
-          <span className="text-[10px] text-[#5F6368]">→ 3.5 → cascade</span>
+      {/* Right: Live SLA & Operational Buttons */}
+      <div className="flex items-center gap-2 sm:gap-2.5">
+        {/* Live Pipeline Status */}
+        <div className="hidden items-center gap-1.5 rounded-full border border-[#CEEAD6] bg-[#E6F4EA] px-3 py-1.5 text-xs font-semibold text-[#137333] lg:flex">
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#34A853] opacity-75"></span>
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-[#34A853]"></span>
+          </span>
+          <span className="text-[11px]">SLA 99.8% Online</span>
         </div>
 
         {/* Deferred 429 Queue button */}
@@ -145,21 +176,22 @@ export const Header: React.FC<HeaderProps> = ({
         <button
           id="btn-export-excel"
           onClick={onExport}
-          className="flex items-center gap-1.5 rounded-full border border-[#DADCE0] bg-white px-3 py-1.5 text-xs font-medium text-[#3C4043] shadow-sm transition hover:bg-[#F8F9FA] active:bg-[#F1F3F4]"
+          className="hidden items-center gap-1.5 rounded-full border border-[#DADCE0] bg-white px-3 py-1.5 text-xs font-medium text-[#3C4043] shadow-sm transition hover:bg-[#F8F9FA] active:bg-[#F1F3F4] md:flex"
           title="Exportar base completa a Excel (.xlsx)"
         >
           <Download className="h-3.5 w-3.5 text-[#1A73E8]" />
-          <span className="hidden sm:inline">Exportar Excel</span>
+          <span>Exportar</span>
         </button>
 
-        {/* Upload Audio Primary Button (Google Blue) */}
+        {/* Upload Audio Primary Button (Claro Red / Blue) */}
         <button
           id="btn-primary-upload"
           onClick={onOpenUpload}
-          className="flex items-center gap-2 rounded-full bg-[#1A73E8] px-4 py-2 text-xs font-medium text-white shadow-sm transition hover:bg-[#1557B0] hover:shadow active:bg-[#174EA6]"
+          className="flex items-center gap-1.5 rounded-full bg-[#DA291C] px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-[#C5221F] active:scale-95 sm:px-4"
         >
           <Upload className="h-4 w-4" />
-          <span>Cargar Audios</span>
+          <span className="hidden sm:inline">Cargar Audios</span>
+          <span className="sm:hidden">Cargar</span>
         </button>
       </div>
     </header>

@@ -4,6 +4,19 @@ export type NPSClasificacion = 'DETRACTOR' | 'NEUTRO' | 'PROMOTOR';
 export type SilencioNivel = 'ÓPTIMO' | 'MODERADO' | 'CRÍTICO';
 export type SeveridadQuiebre = 'CRÍTICO' | 'ALTO' | 'MEDIO';
 
+export type OjtMadurez = 'EN_REFUERZO' | 'EN_DESARROLLO' | 'LISTO_PRODUCCION';
+export type OjtBrecha = 'PROCEDIMIENTO_GUION' | 'HERRAMIENTA_SISTEMAS' | 'HABILIDADES_BLANDAS' | 'NINGUNA_DOMINIO';
+
+export interface DiagnosticoOJT {
+  nivel_madurez: OjtMadurez;
+  indice_autonomia: number; // 0 a 100% de independencia en piso real
+  brecha_principal: OjtBrecha;
+  requiere_intervencion_tutor: boolean;
+  roleplay_sugerido: string; // Ejercicio o simulación de 5 min para el tutor OJT
+  feedback_pedagogico: string; // Recomendación constructiva orientada a acelerar la curva de aprendizaje
+  observacion_piso_real: string; // Cómo se desenvolvió ante el cliente chileno real en piso
+}
+
 export interface CriterioEvaluacion {
   nota: number; // 0-100
   diagnostico: string;
@@ -17,7 +30,52 @@ export interface EvaluacionCriterios {
   eficiencia_tmo: CriterioEvaluacion;
 }
 
+export interface FaseBienvenida {
+  generar_experiencia_positiva: boolean;
+  mencionar_empresa_claro: boolean;
+  mencionar_nombre_apellido: boolean;
+  confirmar_nombre_cliente_rut_celular: boolean;
+  porcentaje?: number;
+}
+
+export interface FaseEntenderResolver {
+  parafrasear_problema: boolean;
+  ordenar_multiples_requerimientos: boolean;
+  utilizar_sistemas_oficiales_somos_clave: boolean;
+  cortesia_por_favor_gracias: boolean;
+  validacion_identidad: boolean;
+  porcentaje?: number;
+}
+
+export interface FaseInformarAccion {
+  indicar_gestion_espera: boolean;
+  retomar_en_menos_de_un_minuto: boolean;
+  claridad_condiciones_comerciales: boolean;
+  resumen_atencion_gestion: boolean;
+  porcentaje?: number;
+}
+
+export interface FaseCierre {
+  preguntas_aseguramiento: boolean;
+  esperar_confirmacion_cliente: boolean;
+  guion_encuesta_escala_0_a_10: boolean;
+  porcentaje?: number;
+}
+
+export interface CumplimientoGuionFases {
+  bienvenida: FaseBienvenida;
+  entender_resolver: FaseEntenderResolver;
+  informar_accion: FaseInformarAccion;
+  cierre: FaseCierre;
+}
+
 export interface CumplimientoGuion {
+  // 4 Fases oficiales de pauta de atención Claro Chile
+  fases?: CumplimientoGuionFases;
+  porcentaje_total?: number;
+  observaciones_auditoria?: string;
+
+  // Campos de compatibilidad directa
   saludo_institucional: boolean;
   verificacion_identidad: boolean;
   escucha_activa: boolean;
@@ -47,11 +105,14 @@ export interface SegmentoDialogo {
 }
 
 export interface NPSPronostico {
-  score: number; // 0 a 10
+  score: number; // 0 a 10 (tNPS Transaccional Equilibrado)
+  score_agente?: number; // 0 a 10 (Apreciación del trato humano, paciencia y esfuerzo del asesor OJT)
   clasificacion: NPSClasificacion;
   pregunta: string;
   escala: string;
   justificacion: string;
+  factor_marca_vs_agente?: string; // Diferenciación: Molestia de fondo con Claro vs Trato humano del asesor
+  camino_a_promotor?: string; // Tip formativo OJT para convertir al cliente en Promotor (9-10)
 }
 
 export interface SilencioAnalisis {
@@ -93,6 +154,7 @@ export interface CallRecord {
   evaluacion_criterios: EvaluacionCriterios;
   cumplimiento_guion: CumplimientoGuion;
   nps_pronostico: NPSPronostico;
+  diagnostico_ojt?: DiagnosticoOJT;
   silencio_analisis: SilencioAnalisis;
   quiebres_atencion: QuiebreAtencion[];
   feedback_coaching: FeedbackCoaching;
@@ -146,4 +208,27 @@ export interface FilterState {
   qaMin: number;
   qaMax: number;
   dateRange: 'all' | 'today' | 'week' | 'month';
+}
+
+export interface SensitivitySettings {
+  silenceToleranceSeconds: number;
+  detractorStrictness: 'flexible' | 'equilibrada' | 'estricta';
+  chileanSlangTolerance: boolean;
+  ojtPedagogicalFocus: boolean;
+}
+
+export interface CalibrationData {
+  basePrompt: string;
+  customDirectives: string;
+  sensitivitySettings: SensitivitySettings;
+  version: string;
+  updatedAt: string;
+}
+
+export interface CalibrationChatMessage {
+  id: string;
+  sender: 'user' | 'assistant';
+  text: string;
+  timestamp: string;
+  suggestedDirective?: string;
 }

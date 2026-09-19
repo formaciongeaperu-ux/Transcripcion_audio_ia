@@ -1,16 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Play, 
-  Pause, 
-  RotateCcw, 
-  RotateCw, 
-  Volume2, 
-  VolumeX, 
   Clock, 
   Frown, 
   Smile, 
   Meh, 
-  Sparkles, 
+  Gauge,
+  SlidersHorizontal,
   AlertCircle, 
   CheckCircle2, 
   XCircle, 
@@ -27,16 +22,24 @@ import {
   Zap,
   Info,
   Headphones,
-  Upload
+  Upload,
+  Columns,
+  Search,
+  ChevronRight,
+  GraduationCap
 } from 'lucide-react';
 import { CallRecord, SegmentoDialogo, QuiebreAtencion } from '../types';
 import { RadarChart } from './RadarChart';
+import { ComplianceAuditCard } from './ComplianceAuditCard';
+import { OjtDiagnosisCard } from './OjtDiagnosisCard';
 
 interface CallDetailViewProps {
   call: CallRecord | null;
   onBackToList: () => void;
   onExportCall: (call: CallRecord) => void;
   onOpenUpload?: () => void;
+  calls?: CallRecord[];
+  onSelectCall?: (call: CallRecord) => void;
 }
 
 export const CallDetailView: React.FC<CallDetailViewProps> = ({
@@ -44,6 +47,8 @@ export const CallDetailView: React.FC<CallDetailViewProps> = ({
   onBackToList,
   onExportCall,
   onOpenUpload,
+  calls,
+  onSelectCall,
 }) => {
   if (!call) {
     return (
@@ -78,22 +83,10 @@ export const CallDetailView: React.FC<CallDetailViewProps> = ({
     );
   }
 
-  // Audio playback state
-  const [currentTime, setCurrentTime] = useState(0);
-  const [seekTime, setSeekTime] = useState<number | null>(null);
+  // Transcript and interaction state
   const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null);
-
-  // Reactive state for real audio file/url
-  const [localAudioFile, setLocalAudioFile] = useState<File | null>(call.audioFile || null);
-  const [localAudioUrl, setLocalAudioUrl] = useState<string | null>(call.audio_url || null);
-  const [localFileName, setLocalFileName] = useState<string | null>(call.file_name || null);
-
-  useEffect(() => {
-    setLocalAudioFile(call.audioFile || null);
-    setLocalAudioUrl(call.audio_url || null);
-    setLocalFileName(call.file_name || null);
-    setCurrentTime(0);
-  }, [call.id, call.audio_url, call.audioFile, call.file_name]);
+  const [splitScreen, setSplitScreen] = useState(false);
+  const [splitSearch, setSplitSearch] = useState('');
 
   const transcriptContainerRef = useRef<HTMLDivElement | null>(null);
 
@@ -103,7 +96,6 @@ export const CallDetailView: React.FC<CallDetailViewProps> = ({
 
   // Jump to specific second from quiebre -> scrolls to turn and highlights it
   const jumpToTime = (second: number) => {
-    setSeekTime(second);
     const targetSegment = segmentos.find(
       (s) => second >= s.inicio && second <= s.fin
     ) || segmentos.find((s) => s.inicio >= second) || segmentos[0];
@@ -117,29 +109,24 @@ export const CallDetailView: React.FC<CallDetailViewProps> = ({
     }
   };
 
-  // Identify active segment based on currentTime (Karaoke effect)
-  useEffect(() => {
-    const currentSegment = segmentos.find(
-      (s) => currentTime >= s.inicio && currentTime <= s.fin
-    );
-    if (currentSegment) {
-      setActiveSegmentId(currentSegment.id);
-      // Auto-scroll active segment into view gently
-      const el = document.getElementById(`segment-${currentSegment.id}`);
-      if (el && transcriptContainerRef.current) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      }
-    } else {
-      setActiveSegmentId(null);
-    }
-  }, [currentTime, segmentos]);
-
   // Format seconds to mm:ss
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60);
     const s = Math.floor(secs % 60);
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
+
+  // Filter calls for split view
+  const splitFilteredCalls = (calls || []).filter((c) => {
+    if (!splitSearch.trim()) return true;
+    const q = splitSearch.toLowerCase();
+    return (
+      c.codigo_llamada.toLowerCase().includes(q) ||
+      c.agente_nombre.toLowerCase().includes(q) ||
+      c.cliente_nombre.toLowerCase().includes(q) ||
+      c.motivo_nombre.toLowerCase().includes(q)
+    );
+  });
 
   // Scoring helpers
   const npsScore = call.nps_pronostico?.score ?? 0;
@@ -167,19 +154,36 @@ export const CallDetailView: React.FC<CallDetailViewProps> = ({
               <span className="rounded-full bg-[#E8F0FE] px-2 py-0.5 text-[11px] font-medium text-[#1A73E8]">
                 {call.cola_atencion}
               </span>
-            </div>
-            <p className="text-xs text-[#5F6368]">
-              Asesor: <strong className="text-[#202124]">{call.agente_nombre}</strong> (<span className="font-mono">{call.agente_id}</span>) • {call.fecha_hora}
-              {(call.file_name || call.audioFile?.name) && (
-                <span className="ml-2 inline-flex items-center rounded-md bg-[#F1F3F4] px-1.5 py-0.5 font-mono text-[10px] text-[#3C4043]">
-                  📁 {call.file_name || call.audioFile?.name}
+              {call.diagnostico_ojt?.requiere_intervencion_tutor && (
+                <span className="flex items-center gap-1 rounded-full bg-[#FCE8E6] px-2 py-0.5 text-[10px] font-bold text-[#EA4335]">
+                  <GraduationCap className="h-3 w-3" />
+                  Alerta OJT Tutor
                 </span>
               )}
+            </div>
+            <p className="text-xs text-[#5F6368]">
+              Asesor: <strong className="text-[#202124]">{call.agente_nombre}</strong> ({call.agente_id}) • {call.fecha_hora}
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Split Screen Toggle */}
+          {calls && calls.length > 1 && onSelectCall && (
+            <button
+              onClick={() => setSplitScreen(!splitScreen)}
+              className={`flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${
+                splitScreen 
+                  ? 'border-[#1A73E8] bg-[#E8F0FE] text-[#1A73E8]' 
+                  : 'border-[#DADCE0] bg-white text-[#3C4043] hover:bg-[#F8F9FA]'
+              }`}
+              title="Alternar vista dividida"
+            >
+              <Columns className="h-3.5 w-3.5" />
+              <span>{splitScreen ? 'Vista Completa' : 'Vista Dividida (Split)'}</span>
+            </button>
+          )}
+
           <button
             id="btn-export-single"
             onClick={() => onExportCall(call)}
@@ -191,108 +195,179 @@ export const CallDetailView: React.FC<CallDetailViewProps> = ({
         </div>
       </div>
 
-      {/* =========================================================================
-          1. TOP QUICK METRIC CARDS (Exact match to User Screenshot 1)
-         ========================================================================= */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {/* QA Score Global */}
-        <div className="flex flex-col justify-between rounded-3xl border border-[#DADCE0] bg-white p-6 shadow-sm">
-          <div className="text-xs font-bold uppercase tracking-wider text-[#5F6368]">
-            QA SCORE GLOBAL
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span
-              className={`text-4xl font-extrabold tracking-tight ${
-                call.qa_score_global >= 85
-                  ? 'text-[#34A853]'
-                  : call.qa_score_global >= 65
-                  ? 'text-[#FBBC05]'
-                  : 'text-[#EA4335]'
-              }`}
-            >
-              {call.qa_score_global}%
-            </span>
-          </div>
-        </div>
+      {/* Main Content Layout (Support Split-Screen) */}
+      <div className={`flex flex-col ${splitScreen ? 'lg:flex-row gap-6 items-start' : 'gap-6'}`}>
+        {/* Left Split Sidebar: Calls fast selector */}
+        {splitScreen && calls && onSelectCall && (
+          <div className="w-full shrink-0 flex flex-col rounded-3xl border border-[#DADCE0] bg-white p-4 shadow-sm lg:w-80 max-h-[calc(100vh-140px)] overflow-hidden sticky top-20">
+            <div className="flex items-center justify-between border-b border-[#DADCE0] pb-3">
+              <span className="text-xs font-bold uppercase tracking-wider text-[#5F6368]">
+                Bandeja OJT ({splitFilteredCalls.length})
+              </span>
+              <button 
+                onClick={() => setSplitScreen(false)}
+                className="text-[11px] font-semibold text-[#1A73E8] hover:underline"
+              >
+                Cerrar split
+              </button>
+            </div>
 
-        {/* Sentimiento */}
-        <div className="flex flex-col justify-between rounded-3xl border border-[#DADCE0] bg-white p-6 shadow-sm">
-          <div className="text-xs font-bold uppercase tracking-wider text-[#5F6368]">
-            SENTIMIENTO
-          </div>
-          <div className="mt-3 flex items-center gap-2.5">
-            {call.sentimiento_label === 'Negativo' ? (
-              <>
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#FCE8E6] text-[#EA4335]">
-                  <Frown className="h-5 w-5" />
-                </div>
-                <span className="text-2xl font-bold text-[#202124]">Negativo</span>
-              </>
-            ) : call.sentimiento_label === 'Positivo' ? (
-              <>
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#E6F4EA] text-[#34A853]">
-                  <Smile className="h-5 w-5" />
-                </div>
-                <span className="text-2xl font-bold text-[#202124]">Positivo</span>
-              </>
-            ) : (
-              <>
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#FEF7E0] text-[#FBBC05]">
-                  <Meh className="h-5 w-5" />
-                </div>
-                <span className="text-2xl font-bold text-[#202124]">Neutro</span>
-              </>
-            )}
-          </div>
-        </div>
+            {/* Quick search input */}
+            <div className="relative my-3">
+              <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-[#5F6368]" />
+              <input
+                type="text"
+                placeholder="Filtrar llamadas..."
+                value={splitSearch}
+                onChange={(e) => setSplitSearch(e.target.value)}
+                className="w-full rounded-xl border border-[#DADCE0] bg-[#F8F9FA] py-1.5 pl-8 pr-3 text-xs text-[#202124] placeholder-[#5F6368] outline-none focus:border-[#1A73E8] focus:bg-white"
+              />
+            </div>
 
-        {/* Driver / TMO */}
-        <div className="flex flex-col justify-between rounded-3xl border border-[#DADCE0] bg-white p-6 shadow-sm">
-          <div className="text-xs font-bold uppercase tracking-wider text-[#5F6368]">
-            DRIVER / TMO
-          </div>
-          <div className="mt-3">
-            <div className="line-clamp-1 text-sm font-bold text-[#202124]" title={call.motivo_nombre}>
-              {call.motivo_nombre}
+            {/* List */}
+            <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
+              {splitFilteredCalls.map((c) => {
+                const isSelected = c.id === call.id;
+                return (
+                  <div
+                    key={c.id}
+                    onClick={() => onSelectCall(c)}
+                    className={`flex cursor-pointer items-center justify-between rounded-2xl p-2.5 text-xs transition ${
+                      isSelected
+                        ? 'border border-[#1A73E8] bg-[#E8F0FE] text-[#1A73E8] shadow-2xs'
+                        : 'border border-transparent bg-[#F8F9FA] text-[#202124] hover:bg-[#F1F3F4]'
+                    }`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 font-mono font-bold text-[11px]">
+                        <span>{c.codigo_llamada}</span>
+                        {c.diagnostico_ojt?.requiere_intervencion_tutor && (
+                          <span className="h-1.5 w-1.5 rounded-full bg-[#EA4335]" />
+                        )}
+                      </div>
+                      <div className="truncate text-[11px] text-[#5F6368]">
+                        {c.agente_nombre}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <span className={`font-extrabold ${
+                        c.qa_score_global >= 80 ? 'text-[#137333]' : c.qa_score_global >= 65 ? 'text-[#B06000]' : 'text-[#EA4335]'
+                      }`}>
+                        {c.qa_score_global}%
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-            <div className="mt-1 flex items-center gap-1.5 text-xs text-[#5F6368]">
-              <Clock className="h-3.5 w-3.5 text-[#EA4335]" />
-              <span className="font-mono font-medium text-[#202124]">{call.duracion_total}</span>
-            </div>
           </div>
-        </div>
+        )}
 
-        {/* Silencio Conversacional */}
-        <div className="flex flex-col justify-between rounded-3xl border border-[#DADCE0] bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-[#5F6368]">
-              SILENCIO CONVERSACIONAL
-            </span>
-            <span
-              className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                call.silencio_analisis?.nivel_silencio === 'CRÍTICO'
-                  ? 'bg-[#FCE8E6] text-[#EA4335]'
-                  : call.silencio_analisis?.nivel_silencio === 'MODERADO'
-                  ? 'bg-[#FEF7E0] text-[#B06000]'
-                  : 'bg-[#E6F4EA] text-[#137333]'
-              }`}
-            >
-              {call.silencio_analisis?.nivel_silencio || 'MODERADO'}
-            </span>
-          </div>
-          <div className="mt-3">
-            <div className="text-4xl font-extrabold tracking-tight text-[#FBBC05]">
-              {call.silencio_analisis?.porcentaje_silencio ?? 15}%
+        {/* Right / Main Audit View */}
+        <div className="flex-1 flex flex-col gap-6 min-w-0 w-full">
+          {/* =========================================================================
+              1. TOP QUICK METRIC CARDS
+             ========================================================================= */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {/* QA Score Global */}
+            <div className="flex flex-col justify-between rounded-3xl border border-[#DADCE0] bg-white p-6 shadow-sm">
+              <div className="text-xs font-bold uppercase tracking-wider text-[#5F6368]">
+                QA SCORE GLOBAL
+              </div>
+              <div className="mt-3 flex items-baseline gap-2">
+                <span
+                  className={`text-4xl font-extrabold tracking-tight ${
+                    call.qa_score_global >= 85
+                      ? 'text-[#34A853]'
+                      : call.qa_score_global >= 65
+                      ? 'text-[#FBBC05]'
+                      : 'text-[#EA4335]'
+                  }`}
+                >
+                  {call.qa_score_global}%
+                </span>
+              </div>
             </div>
-            <div className="mt-1 text-xs text-[#5F6368]">
-              <span className="font-semibold text-[#202124]">
-                {call.silencio_analisis?.silencio_agente_segundos ?? 78}s silencio
-              </span>{' '}
-              / IVR: {call.silencio_analisis?.tiempo_ivr_segundos ?? 430}s
+
+            {/* Sentimiento */}
+            <div className="flex flex-col justify-between rounded-3xl border border-[#DADCE0] bg-white p-6 shadow-sm">
+              <div className="text-xs font-bold uppercase tracking-wider text-[#5F6368]">
+                SENTIMIENTO
+              </div>
+              <div className="mt-3 flex items-center gap-2.5">
+                {call.sentimiento_label === 'Negativo' ? (
+                  <>
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#FCE8E6] text-[#EA4335]">
+                      <Frown className="h-5 w-5" />
+                    </div>
+                    <span className="text-2xl font-bold text-[#202124]">Negativo</span>
+                  </>
+                ) : call.sentimiento_label === 'Positivo' ? (
+                  <>
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#E6F4EA] text-[#34A853]">
+                      <Smile className="h-5 w-5" />
+                    </div>
+                    <span className="text-2xl font-bold text-[#202124]">Positivo</span>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#FEF7E0] text-[#FBBC05]">
+                      <Meh className="h-5 w-5" />
+                    </div>
+                    <span className="text-2xl font-bold text-[#202124]">Neutro</span>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Driver / TMO */}
+            <div className="flex flex-col justify-between rounded-3xl border border-[#DADCE0] bg-white p-6 shadow-sm">
+              <div className="text-xs font-bold uppercase tracking-wider text-[#5F6368]">
+                DRIVER / TMO
+              </div>
+              <div className="mt-3">
+                <div className="line-clamp-1 text-sm font-bold text-[#202124]" title={call.motivo_nombre}>
+                  {call.motivo_nombre}
+                </div>
+                <div className="mt-1 flex items-center gap-1.5 text-xs text-[#5F6368]">
+                  <Clock className="h-3.5 w-3.5 text-[#EA4335]" />
+                  <span className="font-mono font-medium text-[#202124]">{call.duracion_total}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Silencio Conversacional */}
+            <div className="flex flex-col justify-between rounded-3xl border border-[#DADCE0] bg-white p-6 shadow-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-[#5F6368]">
+                  SILENCIO CONVERSACIONAL
+                </span>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                    call.silencio_analisis?.nivel_silencio === 'CRÍTICO'
+                      ? 'bg-[#FCE8E6] text-[#EA4335]'
+                      : call.silencio_analisis?.nivel_silencio === 'MODERADO'
+                      ? 'bg-[#FEF7E0] text-[#B06000]'
+                      : 'bg-[#E6F4EA] text-[#137333]'
+                  }`}
+                >
+                  {call.silencio_analisis?.nivel_silencio || 'MODERADO'}
+                </span>
+              </div>
+              <div className="mt-3">
+                <div className="text-4xl font-extrabold tracking-tight text-[#FBBC05]">
+                  {call.silencio_analisis?.porcentaje_silencio ?? 15}%
+                </div>
+                <div className="mt-1 text-xs text-[#5F6368]">
+                  <span className="font-semibold text-[#202124]">
+                    {call.silencio_analisis?.silencio_agente_segundos ?? 78}s silencio
+                  </span>{' '}
+                  / IVR: {call.silencio_analisis?.tiempo_ivr_segundos ?? 430}s
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      </div>
+
 
       {/* =========================================================================
           2. CLARO NET PROMOTER SCORE (NPS) CARD (Exact match to Screenshot 1)
@@ -310,34 +385,50 @@ export const CallDetailView: React.FC<CallDetailViewProps> = ({
               </span>
             </div>
             <div className="mt-1 flex items-center gap-2">
-              <Sparkles className="h-5 w-5 text-[#EA4335]" />
+              <Gauge className="h-5 w-5 text-[#EA4335]" strokeWidth={2} />
               <h2 className="font-['Google_Sans',sans-serif] text-xl font-bold text-[#202124]">
                 Probable NPS (Net Promoter Score)
               </h2>
             </div>
           </div>
 
-          {/* Right Badge (DETRACTOR PUNTUACIÓN 2/10) */}
-          <div
-            className={`flex items-center gap-2 rounded-full border px-4 py-1.5 text-xs font-bold tracking-wide uppercase shadow-sm ${
-              isDetractor
-                ? 'border-[#EA4335]/30 bg-[#FCE8E6] text-[#EA4335]'
-                : isPromotor
-                ? 'border-[#34A853]/30 bg-[#E6F4EA] text-[#137333]'
-                : 'border-[#FBBC05]/40 bg-[#FEF7E0] text-[#B06000]'
-            }`}
-          >
-            <AlertCircle className="h-4 w-4" />
-            <span>
-              {call.nps_pronostico?.clasificacion} (PUNTUACIÓN {npsScore}/10)
-            </span>
+          {/* Right Badges: General tNPS & Asesor OJT Rating */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Asesor Human Rating */}
+            <div className="flex items-center gap-2 rounded-full border border-[#1A73E8]/30 bg-[#E8F0FE] px-3.5 py-1.5 text-xs font-bold text-[#1A73E8] shadow-xs">
+              <Smile className="h-4 w-4" />
+              <span>
+                TRATO ASESOR OJT: {call.nps_pronostico?.score_agente ?? Math.min(10, Math.max(1, Math.round((call.evaluacion_criterios?.amabilidad_empatia?.nota || 75) / 10)))}/10
+              </span>
+            </div>
+
+            {/* General tNPS Badge */}
+            <div
+              className={`flex items-center gap-2 rounded-full border px-4 py-1.5 text-xs font-bold tracking-wide uppercase shadow-sm ${
+                isDetractor
+                  ? 'border-[#EA4335]/30 bg-[#FCE8E6] text-[#EA4335]'
+                  : isPromotor
+                  ? 'border-[#34A853]/30 bg-[#E6F4EA] text-[#137333]'
+                  : 'border-[#FBBC05]/40 bg-[#FEF7E0] text-[#B06000]'
+              }`}
+            >
+              <AlertCircle className="h-4 w-4" />
+              <span>
+                tNPS GENERAL: {call.nps_pronostico?.clasificacion} ({npsScore}/10)
+              </span>
+            </div>
           </div>
         </div>
 
         {/* Inner Card: Question and 0 to 10 Scale */}
         <div className="mt-6 rounded-2xl border border-[#DADCE0] bg-[#F8F9FA] p-6">
-          <div className="text-[11px] font-bold uppercase tracking-wider text-[#EA4335]">
-            PREGUNTA DE EVALUACIÓN DE ATENCIÓN GENERAL
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-[#EA4335]">
+              PREGUNTA DE EVALUACIÓN DE ATENCIÓN GENERAL
+            </span>
+            <span className="rounded-full bg-[#E8F0FE] px-2 py-0.5 text-[10px] font-bold text-[#1A73E8]">
+              CALIBRACIÓN FORMATIVA OJT
+            </span>
           </div>
           <div className="mt-1 text-base font-bold text-[#202124] md:text-lg">
             "{call.nps_pronostico?.pregunta}"
@@ -383,7 +474,7 @@ export const CallDetailView: React.FC<CallDetailViewProps> = ({
               • DETRACTOR (0 - 6)
             </span>
             <span className="font-semibold text-[#B06000]">
-              • NEUTRO (7 - 8)
+              • NEUTRO / PASIVO (7 - 8) — Zona de oportunidad
             </span>
             <span className="font-semibold text-[#137333]">
               • PROMOTOR (9 - 10)
@@ -391,15 +482,40 @@ export const CallDetailView: React.FC<CallDetailViewProps> = ({
           </div>
         </div>
 
-        {/* Qualitative justification card */}
-        <div className="mt-4 rounded-2xl border border-[#DADCE0] bg-[#FFFFFF] p-4">
-          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[#EA4335]">
-            <MessageSquare className="h-4 w-4" />
-            <span>JUSTIFICACIÓN CUALITATIVA DEL PROBABLE NPS (IA)</span>
+        {/* Qualitative Justification & Factor Marca vs Asesor (2 cols) */}
+        <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {/* Left: Qualitative justification */}
+          <div className="rounded-2xl border border-[#DADCE0] bg-[#FFFFFF] p-4">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[#EA4335]">
+              <MessageSquare className="h-4 w-4" />
+              <span>JUSTIFICACIÓN CUALITATIVA DEL tNPS (IA)</span>
+            </div>
+            <p className="mt-2 text-xs leading-relaxed text-[#3C4043]">
+              {call.nps_pronostico?.justificacion}
+            </p>
+            {call.nps_pronostico?.factor_marca_vs_agente && (
+              <div className="mt-3 rounded-xl border border-[#DADCE0] bg-[#F8F9FA] p-2.5 text-[11px] text-[#5F6368]">
+                <strong className="text-[#202124]">Desacoplamiento Marca vs Asesor: </strong>
+                {call.nps_pronostico.factor_marca_vs_agente}
+              </div>
+            )}
           </div>
-          <p className="mt-2 text-sm leading-relaxed text-[#3C4043]">
-            {call.nps_pronostico?.justificacion}
-          </p>
+
+          {/* Right: Camino a Promotor (Friendly OJT tip) */}
+          <div className="rounded-2xl border border-[#34A853]/30 bg-[#E6F4EA]/30 p-4">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[#137333]">
+              <TrendingUp className="h-4 w-4 text-[#34A853]" strokeWidth={2} />
+              <span>CAMINO A PROMOTOR (9-10) — ACCIÓN OJT EN PISO</span>
+            </div>
+            <p className="mt-2 text-xs leading-relaxed text-[#202124]">
+              {call.nps_pronostico?.camino_a_promotor || 
+                'Enfatizar el cierre con preguntas de aseguramiento activas y recordar la encuesta del 0 al 10 para rescatar notas neutrales y convertirlas en promotoras.'}
+            </p>
+            <div className="mt-3 flex items-center gap-1.5 text-[11px] text-[#137333]">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              <span>Ajuste de 1 minuto en la interacción para elevar la percepción del cliente</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -429,7 +545,7 @@ export const CallDetailView: React.FC<CallDetailViewProps> = ({
         {/* Right Column: Detailed Criteria (7 cols) */}
         <div className="flex flex-col justify-between rounded-3xl border border-[#DADCE0] bg-white p-6 shadow-sm lg:col-span-7">
           <div className="flex items-center gap-2 border-b border-[#DADCE0] pb-4">
-            <Sparkles className="h-5 w-5 text-[#EA4335]" />
+            <SlidersHorizontal className="h-5 w-5 text-[#EA4335]" strokeWidth={2} />
             <h3 className="font-['Google_Sans',sans-serif] text-base font-bold text-[#202124]">
               Evaluación Detallada de Criterios
             </h3>
@@ -696,9 +812,9 @@ export const CallDetailView: React.FC<CallDetailViewProps> = ({
                     <button
                       onClick={() => jumpToTime(q.segundo)}
                       className="flex items-center gap-1 rounded-full bg-white px-2 py-0.5 font-mono text-[11px] font-bold text-[#1A73E8] shadow-xs hover:bg-[#E8F0FE]"
-                      title="Saltar a este segundo"
+                      title="Ver turno en transcripción"
                     >
-                      <Play className="h-3 w-3 fill-current" />
+                      <Clock className="h-3 w-3 text-[#1A73E8]" />
                       <span>{q.tiempo}</span>
                     </button>
                   </div>
@@ -731,30 +847,39 @@ export const CallDetailView: React.FC<CallDetailViewProps> = ({
       </div>
 
       {/* =========================================================================
-          6. FEEDBACK Y COACHING PARA EL ASESOR & CHECKLIST GUION
+          6. DIAGNÓSTICO OJT - FORMACIÓN EN PUESTO REAL CON CLIENTES VIVOS
          ========================================================================= */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-        {/* Left: Coaching & Action Plan (8 cols) */}
-        <div className="flex flex-col justify-between rounded-3xl border border-[#DADCE0] bg-white p-6 shadow-sm lg:col-span-8">
-          <div className="flex items-center gap-2 border-b border-[#DADCE0] pb-4">
-            <Lightbulb className="h-5 w-5 text-[#FBBC05]" />
-            <div>
-              <h3 className="font-['Google_Sans',sans-serif] text-base font-bold text-[#202124]">
-                Plan de Feedback & Coaching Personalizado
-              </h3>
-              <p className="text-xs text-[#5F6368]">
-                Enfoque para tomar acciones inmediatas a partir de los hallazgos de la IA
-              </p>
-            </div>
-          </div>
+      <OjtDiagnosisCard call={call} />
 
-          <div className="mt-4 flex flex-col gap-4">
-            {/* Fortalezas */}
+      {/* =========================================================================
+          7. PAUTA OFICIAL DE ATENCIÓN CLARO CHILE (4 FASES)
+         ========================================================================= */}
+      <ComplianceAuditCard call={call} />
+
+      {/* =========================================================================
+          7. FEEDBACK Y COACHING PARA EL ASESOR
+         ========================================================================= */}
+      <div className="rounded-3xl border border-[#DADCE0] bg-white p-6 shadow-sm">
+        <div className="flex items-center gap-2 border-b border-[#DADCE0] pb-4">
+          <Lightbulb className="h-5 w-5 text-[#FBBC05]" />
+          <div>
+            <h3 className="font-['Google_Sans',sans-serif] text-base font-bold text-[#202124]">
+              Plan de Feedback & Coaching Personalizado
+            </h3>
+            <p className="text-xs text-[#5F6368]">
+              Enfoque para tomar acciones inmediatas a partir de los hallazgos de la IA
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+          {/* 1. Fortalezas */}
+          <div className="flex flex-col justify-between rounded-2xl border border-[#DADCE0] bg-[#F8F9FA] p-4">
             <div>
               <span className="text-xs font-bold uppercase tracking-wider text-[#137333]">
                 ✓ Fortalezas Identificadas
               </span>
-              <ul className="mt-1.5 space-y-1">
+              <ul className="mt-2 space-y-1.5">
                 {call.feedback_coaching?.fortalezas?.map((f, idx) => (
                   <li key={idx} className="flex items-start gap-2 text-xs text-[#3C4043]">
                     <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#34A853]" />
@@ -763,13 +888,15 @@ export const CallDetailView: React.FC<CallDetailViewProps> = ({
                 ))}
               </ul>
             </div>
+          </div>
 
-            {/* Oportunidades de mejora */}
+          {/* 2. Oportunidades de mejora */}
+          <div className="flex flex-col justify-between rounded-2xl border border-[#DADCE0] bg-[#F8F9FA] p-4">
             <div>
               <span className="text-xs font-bold uppercase tracking-wider text-[#B06000]">
                 ⚠ Oportunidades de Mejora Clave
               </span>
-              <ul className="mt-1.5 space-y-1">
+              <ul className="mt-2 space-y-1.5">
                 {call.feedback_coaching?.oportunidades_mejora?.map((o, idx) => (
                   <li key={idx} className="flex items-start gap-2 text-xs text-[#3C4043]">
                     <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#FBBC05]" />
@@ -778,120 +905,35 @@ export const CallDetailView: React.FC<CallDetailViewProps> = ({
                 ))}
               </ul>
             </div>
+          </div>
 
-            {/* Guion Sugerido Alternativo */}
-            <div className="rounded-2xl border border-[#DADCE0] bg-[#FEF7E0]/40 p-4">
+          {/* 3. Guion Sugerido Alternativo */}
+          <div className="flex flex-col justify-between rounded-2xl border border-[#DADCE0] bg-[#FEF7E0]/40 p-4">
+            <div>
               <span className="text-xs font-bold text-[#B06000]">
                 Guion Sugerido Alternativo (Para re-entrenamiento):
               </span>
-              <p className="mt-1 text-xs italic leading-relaxed text-[#3C4043]">
+              <p className="mt-1.5 text-xs italic leading-relaxed text-[#3C4043]">
                 "{call.feedback_coaching?.guion_sugerido_alternativo}"
               </p>
             </div>
+          </div>
 
-            {/* Plan de Acción */}
-            <div className="rounded-2xl border border-[#DADCE0] bg-[#F8F9FA] p-4">
+          {/* 4. Plan de Acción */}
+          <div className="flex flex-col justify-between rounded-2xl border border-[#DADCE0] bg-[#F8F9FA] p-4">
+            <div>
               <span className="text-xs font-bold text-[#1A73E8]">
                 Plan de Acción Recomendado para Supervisión:
               </span>
-              <p className="mt-1 text-xs leading-relaxed text-[#3C4043]">
+              <p className="mt-1.5 text-xs leading-relaxed text-[#3C4043]">
                 {call.feedback_coaching?.plan_accion}
               </p>
             </div>
           </div>
         </div>
-
-        {/* Right: Script Compliance Checklist (4 cols) */}
-        <div className="flex flex-col justify-between rounded-3xl border border-[#DADCE0] bg-white p-6 shadow-sm lg:col-span-4">
-          <div>
-            <div className="flex items-center gap-2 border-b border-[#DADCE0] pb-4">
-              <UserCheck className="h-5 w-5 text-[#1A73E8]" />
-              <h3 className="font-['Google_Sans',sans-serif] text-base font-bold text-[#202124]">
-                Cumplimiento de Guion
-              </h3>
-            </div>
-
-            <div className="mt-4 flex flex-col gap-3">
-              {[
-                { 
-                  label: 'Saludo Institucional (Marca Claro + Asesor)', 
-                  passed: call.cumplimiento_guion?.saludo_institucional 
-                },
-                { 
-                  label: 'Verificación de Titularidad (RUT Chileno)', 
-                  passed: call.cumplimiento_guion?.verificacion_identidad 
-                },
-                { 
-                  label: 'Escucha Activa sin Interrupciones', 
-                  passed: typeof call.cumplimiento_guion?.escucha_activa === 'boolean' 
-                    ? call.cumplimiento_guion.escucha_activa 
-                    : !call.quiebres_atencion?.some(q => q.tipo.toLowerCase().includes('interrup'))
-                },
-                { 
-                  label: 'Entrega Ticket de Atención (Normativa SUBTEL)', 
-                  passed: typeof call.cumplimiento_guion?.entrega_ticket_subtel === 'boolean' 
-                    ? call.cumplimiento_guion.entrega_ticket_subtel 
-                    : !call.alertas?.some(a => a.toLowerCase().includes('ticket subtel'))
-                },
-                { 
-                  label: 'Despedida Cordial Corporativa', 
-                  passed: call.cumplimiento_guion?.despedida_cordial 
-                },
-              ].map((item, idx) => (
-                <div
-                  key={idx}
-                  className="flex items-center justify-between rounded-xl border border-[#DADCE0] bg-[#F8F9FA] px-3 py-2.5"
-                >
-                  <span className="text-xs font-medium text-[#3C4043]">{item.label}</span>
-                  {item.passed ? (
-                    <span className="flex items-center gap-1 rounded-full bg-[#E6F4EA] px-2 py-0.5 text-[10px] font-bold text-[#137333]">
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                      <span>CUMPLE</span>
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-1 rounded-full bg-[#FCE8E6] px-2 py-0.5 text-[10px] font-bold text-[#EA4335]">
-                      <XCircle className="h-3.5 w-3.5" />
-                      <span>NO CUMPLE</span>
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Alertas */}
-          <div className="mt-4 border-t border-[#DADCE0] pt-4">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#5F6368]">
-                Alertas Críticas & Regulatorias
-              </span>
-              <span className="text-[10px] text-[#5F6368]">SERNAC / SUBTEL / Churn</span>
-            </div>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {call.alertas && call.alertas.length > 0 ? (
-                call.alertas.map((al, idx) => {
-                  const isRegulatory = /sernac|subtel|churn|baja|portabilidad/i.test(al);
-                  return (
-                    <span
-                      key={idx}
-                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                        isRegulatory
-                          ? 'bg-[#EA4335] text-white shadow-xs'
-                          : 'bg-[#FCE8E6] text-[#EA4335]'
-                      }`}
-                    >
-                      {isRegulatory && <AlertCircle className="h-3 w-3" />}
-                      <span>{al}</span>
-                    </span>
-                  );
-                })
-              ) : (
-                <span className="text-xs text-[#5F6368] italic">Sin alertas críticas detectadas</span>
-              )}
-            </div>
-          </div>
-        </div>
       </div>
     </div>
+  </div>
+</div>
   );
 };

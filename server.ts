@@ -5,6 +5,7 @@ import os from 'os';
 import { execFile } from 'child_process';
 import dotenv from 'dotenv';
 import { GoogleGenAI, Type } from '@google/genai';
+import { createServer as createViteServer } from 'vite';
 
 dotenv.config();
 
@@ -15,63 +16,31 @@ const PORT = 3000;
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Multi-Key API Harness Manager
-function getApiKeys(): string[] {
-  const keys: string[] = [];
-
-  // 1. Check GEMINI_API_KEYS (comma-separated list)
-  if (process.env.GEMINI_API_KEYS) {
-    process.env.GEMINI_API_KEYS.split(',')
-      .map(k => k.trim())
-      .filter(k => k.length > 0)
-      .forEach(k => { if (!keys.includes(k)) keys.push(k); });
-  }
-
-  // 2. Check standard GEMINI_API_KEY (can also be comma-separated)
-  if (process.env.GEMINI_API_KEY) {
-    process.env.GEMINI_API_KEY.split(',')
-      .map(k => k.trim())
-      .filter(k => k.length > 0)
-      .forEach(k => { if (!keys.includes(k)) keys.push(k); });
-  }
-
-  // 3. Check numbered keys (GEMINI_API_KEY_1, GEMINI_API_KEY_2, ... up to 10)
-  for (let i = 1; i <= 10; i++) {
-    const k = process.env[`GEMINI_API_KEY_${i}`];
-    if (k && k.trim()) {
-      const clean = k.trim();
-      if (!keys.includes(clean)) keys.push(clean);
-    }
-  }
-
-  return keys;
-}
-
-const clientCache = new Map<string, GoogleGenAI>();
-function getGenAIClient(apiKey: string): GoogleGenAI {
-  let client = clientCache.get(apiKey);
-  if (!client) {
-    client = new GoogleGenAI({
-      apiKey,
+// Lazy GoogleGenAI initialization
+let aiClient: GoogleGenAI | null = null;
+function getGenAI(): GoogleGenAI | null {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) return null;
+  if (!aiClient) {
+    aiClient = new GoogleGenAI({
+      apiKey: key,
       httpOptions: {
         headers: {
           'User-Agent': 'aistudio-build',
         },
       },
     });
-    clientCache.set(apiKey, client);
   }
-  return client;
+  return aiClient;
 }
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
-  const keys = getApiKeys();
+  const hasKey = !!process.env.GEMINI_API_KEY;
   res.json({
     status: 'ok',
-    geminiKeyConfigured: keys.length > 0,
-    totalApiKeysInHarness: keys.length,
-    supportedModels: ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'],
+    geminiKeyConfigured: hasKey,
+    supportedModels: ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-3.1-pro-preview'],
     serverTime: new Date().toISOString(),
   });
 });
@@ -134,6 +103,477 @@ app.post('/api/convert-audio', async (req, res) => {
 // Sleep helper for exponential backoff with jitter
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms + Math.random() * 500));
 
+// ==========================================
+// CALIBRATION & PROMPT GOVERNANCE ENGINE
+// ==========================================
+
+const DEFAULT_BASE_PROMPT = `Eres un tutor y auditor experto en Speech Analytics, Aseguramiento de la Calidad (QA) y Aceleración de Curva de Aprendizaje para Contact Centers de Claro en Chile.
+
+CONTEXTO CRÍTICO DE OJT (ON-THE-JOB TRAINING / PISO DE ENTRENAMIENTO EN VIVO):
+- ESTAS LLAMADAS SON DE ASESORES EN PROCESO DE OJT / NIDO ATENDIENDO A CLIENTES REALES EN PRODUCCIÓN EN VIVO.
+- Los asesores enfrentan doble demanda operativa: atender con cortesía la rapidez y modismos de clientes chilenos reales mientras buscan procedimientos en los sistemas corporativos (Somos Clave, CRM) o consultan a su tutor de piso.
+- Tu misión no es punitiva, sino FORMATIVA Y DE ACELERACIÓN:
+  * Diferencia los errores actitudinales (graves) de las vacilaciones o pausas por consulta/búsqueda en aplicativos (oportunidades pedagógicas).
+  * En 'diagnostico_ojt', entrega un diagnóstico que le sirva al supervisor/formador de piso:
+    - 'nivel_madurez': 'EN_REFUERZO' (requiere acompañamiento continuo), 'EN_DESARROLLO' (resuelve pero con dudas de procedimiento), o 'LISTO_PRODUCCION' (autónomo y seguro).
+    - 'indice_autonomia': número de 0 a 100% que estima su grado de independencia.
+    - 'brecha_principal': 'PROCEDIMIENTO_GUION' | 'HERRAMIENTA_SISTEMAS' | 'HABILIDADES_BLANDAS' | 'NINGUNA_DOMINIO'.
+    - 'requiere_intervencion_tutor': boolean si amerita feedback inmediato en piso.
+    - 'roleplay_sugerido': una simulación práctica de 5 minutos específica que el tutor de piso debe realizar con el asesor.
+    - 'feedback_pedagogico': feedback positivo y motivacional que impulse su aprendizaje.
+    - 'observacion_piso_real': diagnóstico de cómo lidió con el cliente chileno real.
+
+CALIBRACIÓN tNPS AMIGABLE, EQUILIBRADA Y JUSTA:
+- El tNPS predicho debe ser constructivo y realista. Los clientes de telecomunicaciones suelen separar la molestia con la empresa Claro (boletas altas, caídas de señal) de la atención humana del asesor.
+- REGLAS OBLIGATORIAS DE CALIBRACIÓN tNPS:
+  1. Desacopla la marca del asesor: Si el cliente empezó molesto por un cobro o falla de Claro, pero el asesor novel fue paciente, empático y predispuesto, califica su esfuerzo humano en 'score_agente' (0-10) y explícalo en 'factor_marca_vs_agente'.
+  2. Sensibilidad al cierre real: Si el cliente finalizó tranquilo, conforme o agradeciendo la atención ("gracias por su tiempo", "muy amable", "se pasó", "gracias por la paciencia"), el tNPS global DEBE situarse en NEUTRO (7-8) o PROMOTOR (9-10). ¡Nunca clasifiques a un cliente agradecido como DETRACTOR!
+  3. Zona constructiva en OJT (Neutros 7-8): En OJT, un Neutro (7-8) no es un fracaso; es un "Casi Promotor". Explica en 'camino_a_promotor' qué pequeño detalle puntual (ej: mayor seguridad vocal, resumir las condiciones sin dudar) lo convertiría en 9 o 10.
+  4. Reserva DETRACTOR (0-6) únicamente cuando hubo un quiebre grave originado directamente por el asesor (maltrato, tono cortante, colgar intencionalmente, desinformación o abandono).
+
+REGLA SUPREMA - TRANSCRIPCIÓN REAL Y VERÍDICA (ESTRICTAMENTE PROHIBIDO CONTENIDO GENÉRICO O PLANTILLAS):
+- Tu función fundamental es escuchar atentamente el archivo de audio adjunto y transcribir LITERALMENTE lo que se habla en la grabación real.
+- QUEDA ESTRICTAMENTE PROHIBIDO inventar diálogos, usar plantillas prefabricadas o generar textos genéricos de ejemplo como "Juan", "Pedro Pérez", "RUT 12.345.678-K", o conversaciones de muestra.
+- Debes transcribir cada palabra exacta, modismo, pausa y respuesta que se escuche en la llamada real de principio a fin.
+- Si en la llamada los interlocutores dicen sus nombres reales, extráelos en 'agente_nombre_detectado' y 'cliente_nombre_detectado'.
+
+CONTEXTO CULTURAL Y OPERATIVO HÍBRIDO (CHILENO - PERUANO):
+- La atención en los Contact Centers de Claro para Chile involucra habitualmente una interacción híbrida:
+  * ASESORES: Generalmente con acento peruano neutro institucional o formal, protocolos de atención al cliente de telecomunicaciones, modismos de servicio cordiales.
+  * CLIENTES: Ciudadanos chilenos con modismos locales, acento chileno, ritmo y cadencia rápida.
+- Comprende y transcribe fielmente el vocabulario y términos chilenos:
+  * "Boleta" = Cuenta / Factura mensual.
+  * "RUT" = Documento de identidad nacional chileno.
+  * "Al tiro" = De inmediato / Rápidamente.
+  * "Cachar / Cachái" = Entender / ¿Entiendes?
+  * "Chato / Chata" = Molesto(a) / Cansado(a) ("estoy chato con el cobro").
+  * "Caleta" = Mucho / Bastante tiempo.
+  * "Bajar el plan / Portabilidad / Cortar la línea" = Gestiones comerciales.
+  * "Banda ancha / Factibilidad / ONT / Router" = Términos técnicos.
+
+DETECCIÓN DE ALERTAS CRÍTICAS:
+- Registra en 'alertas' si el cliente menciona:
+  * "SERNAC" (Servicio Nacional del Consumidor).
+  * "SUBTEL" (Subsecretaría de Telecomunicaciones).
+  * "Demanda", "Abogado", "Denuncia", "Estafa", "Burla", "Colmo".
+  * Intención de fuga o portabilidad a Entel, Movistar o WOM.
+
+PAUTA OFICIAL DE ATENCIÓN INSTITUCIONAL CLARO CHILE (4 FASES):
+Evalúa rigurosamente el desempeño del asesor según la matriz de 4 fases operativas:
+
+FASE 1: BIENVENIDA
+1. Generar experiencia positiva desde el primer contacto: Tono cordial, empático y predispuesto al servicio.
+2. Mencionar el nombre de la empresa y dar la bienvenida a Claro.
+3. Mencionar OBLIGATORIAMENTE su PRIMER NOMBRE y PRIMER APELLIDO (ej: "Mi nombre es Carlos Muñoz". Si solo menciona su nombre de pila sin apellido, marcar false).
+4. Confirmar el nombre de la persona con quien se habla, validando número de celular a consultar o RUT en caso amerite.
+
+FASE 2: ENTENDER Y RESOLVER EL REQUERIMIENTO DEL CLIENTE
+1. Parafrasear el problema del cliente: Demostrar comprensión activa reformulando con sus propias palabras la necesidad planteada.
+2. Ordenar múltiples requerimientos: Si el cliente expone más de una consulta, organizarlas metódicamente y atender cada una.
+3. Utilizar sistemas oficiales y procedimientos publicados en Somos Clave.
+4. Cortesía procedimental: Pedir "por favor" y "agradecer" al cliente al requerir datos, documentos o instrucciones.
+5. Validación de identidad: Realizar las preguntas de seguridad o verificación de titularidad por RUT según corresponda.
+
+FASE 3: INFORMAR ACCIÓN AL CLIENTE
+1. Indicar al cliente qué gestión específica se está realizando al pedir un momento en espera (hold).
+2. Retomar la llamada en MENOS DE UN MINUTO para mantener comunicación constante, sin dejar silencios prolongados.
+3. Claridad en condiciones comerciales: Explicar con precisión cambios de plan, costos, proporcionales, descuentos, promociones y su vigencia exacta.
+4. Resumen de atención: Realizar un breve resumen de toda la gestión efectuada al terminar la explicación de la consulta.
+
+FASE 4: CIERRE
+1. Preguntas de aseguramiento: Realizar preguntas de confirmación explícita:
+   * "¿Tiene alguna otra consulta adicional?"
+   * "¿Quedó clara la información brindada?"
+   * "¿Le puedo ayudar en algo más?"
+2. Esperar confirmación activa por parte del cliente antes de avanzar.
+3. Protocolo normativo de finalización y encuesta (Escala 0 al 10):
+   * Indicar que eventualmente podría recibir por Mail o SMS una encuesta de atención.
+   * Explicar explícitamente la escala de notas: "con una escala de 0 a 10, donde 0 representa la nota más baja y 10 la más alta".
+   * Agradecer su colaboración resaltando la importancia de su opinión.
+
+En 'cumplimiento_guion.fases', evalúa cada booleano fielmente. En 'porcentaje_total' calcula el porcentaje de 0 a 100 de ítems cumplidos. En 'observaciones_auditoria' describe detalladamente cualquier omisión o cumplimiento destacado.
+
+TRANSCRIPCIÓN EXHAUSTIVA DE PRINCIPIO A FIN EN 'segmentos':
+- Provee secuencialmente TODOS los turnos reales de habla desde el segundo 0 hasta el final de la llamada.
+- Cada segmento debe tener:
+  * 'hablante': 'agente' | 'cliente'
+  * 'inicio': segundo exacto en que empieza a hablar
+  * 'fin': segundo exacto en que termina de hablar
+  * 'texto': transcripción literal de lo que dijo en ese turno (palabra por palabra)
+  * 'sentimientoScore': valor entre -1.0 (muy molesto/frustrado) y 1.0 (muy satisfecho/amable)
+- No resumas la conversación en 3 o 4 líneas. Transcribe todos y cada uno de los turnos de diálogo que ocurran en el audio real.
+
+AUDITORÍA DE CALIDAD Y SPEECH ANALYTICS (CLARO CHILE):
+1. Evalúa los 5 criterios de calidad de 0 a 100: Amabilidad/Empatía, Seguridad al expresarse, Claridad de información, Tiempos de espera (hold), y Eficiencia TMO con diagnósticos descriptivos.
+2. Identifica los QUIEBRES de los asesores a nivel de atención (momentos críticos donde el asesor fue cortante, condescendiente, interrumpió al cliente, desinformó, o dejó silencios sin cortesía).
+3. Pronóstico de NPS con la pregunta oficial: "¿Qué tan probable es que recomiendes Claro a un amigo o familiar? Considerando una escala de 0 a 10, donde 0 es 'Nada probable' y 10 es 'Muy probable'".
+4. Tiempo de Silencio Conversacional: Evalúa el silencio considerando ÚNICAMENTE desde que le ingresa la llamada al agente y puede interactuar, separándolo del IVR previo.
+5. Plan de coaching y feedback accionable para el asesor, incluyendo guion sugerido alternativo y plan de acción.`;
+
+const DEFAULT_CUSTOM_DIRECTIVES = `# DIRECTIVAS ADICIONALES DE CALIBRACIÓN ACTIVA (OPERACIÓN CLARO CHILE)
+# Estas directivas tienen prioridad y adaptan el juicio del motor de IA para la operación diaria.
+
+1. TOLERANCIA A PAUSAS EN SISTEMAS INTERNOS (SOMOS CLAVE / CRM):
+- Si el asesor pide tiempo para validar en el sistema ("Permítame un momento mientras abro el sistema", "Deme un instante en línea"), no penalizar la nota de tiempos de espera si retoma el contacto dentro de 60 segundos.
+- Considerar estas pausas como oportunidad formativa de agilidad, nunca como desidia o negligencia.
+
+2. ATENCIÓN DE CLIENTES DETRACTORES POR COBROS O CAÍDA DE SEÑAL:
+- Si el cliente ingresa enfurecido por fallas de facturación o caída masiva de red, evaluar el 'score_agente' independientemente de la queja hacia Claro. Si el asesor mantuvo la calma y empatizó, su nota de amabilidad debe ser >= 85.
+
+3. REGLA DE CIERRE Y ENCUESTA DE SERVICIO:
+- Si el cliente apura la despedida diciendo "muchas gracias, que esté bien" e interrumpe antes de que el asesor termine de explicar la escala 0-10, calificar 'cierre.esperar_confirmacion_cliente' como cumplido y no castigar severamente el cumplimiento global.`;
+
+const DEFAULT_SENSITIVITY_SETTINGS = {
+  silenceToleranceSeconds: 30,
+  detractorStrictness: 'equilibrada' as 'flexible' | 'equilibrada' | 'estricta',
+  chileanSlangTolerance: true,
+  ojtPedagogicalFocus: true,
+};
+
+const CALIBRATION_FILE = path.join(process.cwd(), 'calibration.json');
+
+function loadCalibration(): {
+  customDirectives: string;
+  sensitivitySettings: typeof DEFAULT_SENSITIVITY_SETTINGS;
+  version: string;
+  updatedAt: string;
+} {
+  try {
+    if (fs.existsSync(CALIBRATION_FILE)) {
+      const raw = fs.readFileSync(CALIBRATION_FILE, 'utf-8');
+      const data = JSON.parse(raw);
+      return {
+        customDirectives: typeof data.customDirectives === 'string' ? data.customDirectives : DEFAULT_CUSTOM_DIRECTIVES,
+        sensitivitySettings: {
+          silenceToleranceSeconds: data.sensitivitySettings?.silenceToleranceSeconds ?? DEFAULT_SENSITIVITY_SETTINGS.silenceToleranceSeconds,
+          detractorStrictness: data.sensitivitySettings?.detractorStrictness ?? DEFAULT_SENSITIVITY_SETTINGS.detractorStrictness,
+          chileanSlangTolerance: data.sensitivitySettings?.chileanSlangTolerance ?? DEFAULT_SENSITIVITY_SETTINGS.chileanSlangTolerance,
+          ojtPedagogicalFocus: data.sensitivitySettings?.ojtPedagogicalFocus ?? DEFAULT_SENSITIVITY_SETTINGS.ojtPedagogicalFocus,
+        },
+        version: data.version || 'v1.3.0',
+        updatedAt: data.updatedAt || new Date().toISOString()
+      };
+    }
+  } catch (err) {
+    console.warn('[Calibration] Error al leer calibration.json, usando valores por defecto:', err);
+  }
+  return {
+    customDirectives: DEFAULT_CUSTOM_DIRECTIVES,
+    sensitivitySettings: { ...DEFAULT_SENSITIVITY_SETTINGS },
+    version: 'v1.3.0',
+    updatedAt: new Date().toISOString()
+  };
+}
+
+let activeCalibration = loadCalibration();
+
+function saveCalibration(customDirectives: string, sensitivitySettings: typeof DEFAULT_SENSITIVITY_SETTINGS) {
+  activeCalibration = {
+    customDirectives,
+    sensitivitySettings,
+    version: 'v1.3.0',
+    updatedAt: new Date().toISOString()
+  };
+  try {
+    fs.writeFileSync(CALIBRATION_FILE, JSON.stringify(activeCalibration, null, 2), 'utf-8');
+    console.log('[Calibration] Configuración guardada en calibration.json');
+  } catch (err) {
+    console.error('[Calibration] Error guardando calibration.json:', err);
+  }
+}
+
+function getActiveFullPrompt(): string {
+  let prompt = DEFAULT_BASE_PROMPT;
+
+  if (activeCalibration.customDirectives && activeCalibration.customDirectives.trim()) {
+    prompt += `\n\n--- DIRECTIVAS ADICIONALES DE CALIBRACIÓN ACTIVA (CONFIGURADAS POR EL AUDITOR) ---\n${activeCalibration.customDirectives.trim()}`;
+  }
+
+  if (activeCalibration.sensitivitySettings) {
+    const s = activeCalibration.sensitivitySettings;
+    prompt += `\n\n--- PARÁMETROS OPERATIVOS DE SENSIBILIDAD DINÁMICA ---
+- Tolerancia máxima a silencios/pausas operativas sin hold formal: ${s.silenceToleranceSeconds} segundos.
+- Rigor en clasificación de Detractores tNPS: ${s.detractorStrictness.toUpperCase()}.
+- Tolerancia a modismos locales y modulación chilena: ${s.chileanSlangTolerance ? 'ALTA (no penalizar modismos propios del país)' : 'ESTRICTA'}.
+- Enfoque pedagógico OJT para tutor de piso: ${s.ojtPedagogicalFocus ? 'PRIORITARIO (priorizar feedback formativo constructivo)' : 'ESTÁNDAR'}.`;
+  }
+
+  return prompt;
+}
+
+// Simulated QA Consultant when no Gemini API key is configured
+function generateSimulatedConsultantReply(question: string, currentDirectives: string) {
+  const q = question.toLowerCase();
+
+  if (q.includes('silencio') || q.includes('pausa') || q.includes('hold') || q.includes('espera')) {
+    return {
+      reply: `Para calibrar la detección de silencios en piso OJT, es fundamental distinguir entre **dead air por desconexión** y **pausas legítimas de navegación en Somos Clave / CRM**.\n\nEn llamadas de asesores noveles, los tiempos de consulta suelen rondar entre 20 y 45 segundos mientras buscan los procedimientos corporativos. Para evitar que la IA castigue injustamente el indicador de eficiencia TMO o tiempos de espera, te recomiendo agregar la siguiente directiva al prompt:`,
+      suggestedDirective: `- Tolerancia en Búsqueda de Sistemas: Si el asesor anuncia al cliente que está verificando en Somos Clave o en el CRM, no clasificar las pausas de hasta 45 segundos como silencio crítico o quiebre de atención.`
+    };
+  }
+
+  if (q.includes('detractor') || q.includes('nps') || q.includes('molest') || q.includes('enojad') || q.includes('reclamo')) {
+    return {
+      reply: `En los contact centers de telecomunicaciones (Claro Chile), los clientes a menudo se comunican molestos por problemas técnicos o cobros indebidos. La IA tiende a veces a calificar la llamada como DETRACTOR (0-6) basándose únicamente en el malestar del cliente hacia Claro, descuidando el excelente esfuerzo humano y empatía del asesor.\n\nPara blindar la nota del asesor y lograr un tNPS equilibrado, puedes incorporar esta directiva:`,
+      suggestedDirective: `- Blindaje tNPS en Reclamos Críticos: Cuando el cliente manifieste hostilidad o frustración con la red o facturación de Claro, pero el asesor responda con calma, respeto y valide su reclamo, priorizar 'score_agente' >= 8.5 y clasificar el pronóstico global en NEUTRO si el cliente finalizó sin insultos hacia el asesor.`
+    };
+  }
+
+  if (q.includes('saludo') || q.includes('bienvenida') || q.includes('nombre') || q.includes('apellido') || q.includes('interrump')) {
+    return {
+      reply: `En el contexto chileno, es común que los clientes con urgencia comiencen a explicar su problema de inmediato ("Hola, mire sabe que se me cortó la línea"), impidiendo que el asesor recite completo su nombre, apellido y bienvenida institucional.\n\nPara que la IA no marque la Fase 1 como incumplida en estos escenarios, te sugiero esta directiva de calibración:`,
+      suggestedDirective: `- Flexibilidad en Bienvenida por Interrupción: Si el cliente interrumpe el saludo inicial explicando de golpe su requerimiento, considerar la bienvenida como cumplida si el asesor se presentó al menos con su nombre y retomó cordialmente el protocolo.`
+    };
+  }
+
+  if (q.includes('rut') || q.includes('seguridad') || q.includes('titular') || q.includes('identidad')) {
+    return {
+      reply: `La validación de titularidad por RUT es una exigencia legal y de seguridad de Claro Chile. Si deseas calibrar una exigencia más rigurosa para evitar fraudes y asegurar el cumplimiento de la política de protección de datos:`,
+      suggestedDirective: `- Validación Obligatoria de RUT y Titularidad: Exigir de manera obligatoria que el asesor verifique el RUT completo y al menos un dato secundario de validación antes de entregar información de saldos o tráfico. Si no se realiza, marcar quiebre de atención de severidad ALTO.`
+    };
+  }
+
+  if (q.includes('cierre') || q.includes('encuesta') || q.includes('escala') || q.includes('0 a 10') || q.includes('sms')) {
+    return {
+      reply: `La pauta de Claro exige explicar la encuesta con la escala del 0 al 10. Sin embargo, en llamadas rápidas el cliente a veces cuelga abruptamente. Esta directiva calibra el criterio:`,
+      suggestedDirective: `- Transferencia o Explicación de Encuesta: Si el asesor menciona la encuesta de satisfacción por SMS o llamada pero el cliente finaliza la llamada antes de escuchar la escala 0-10, calificar el protocolo de cierre como PARCIALMENTE CUMPLIDO (80%) sin considerarlo quiebre de servicio.`
+    };
+  }
+
+  return {
+    reply: `Entendido. He analizado el caso que describes en relación a la pauta de calidad Claro Chile y el contexto OJT.\n\nPara que la Inteligencia Artificial interprete con precisión esta situación en las próximas llamadas analizadas, lo más efectivo es definir una directiva con regla de excepción explícita. Aquí tienes una directiva lista para ser incorporada a tu calibración:`,
+    suggestedDirective: `- Regla de Excepción Operativa: En situaciones donde se presenten particularidades no habituales en la atención, evaluar con prioridad la actitud orientada a la solución, la cortesía hacia el usuario y la no afectación de la experiencia de cliente.`
+  };
+}
+
+// Calibration API Endpoints
+app.get('/api/calibration', (req, res) => {
+  res.json({
+    success: true,
+    data: {
+      basePrompt: DEFAULT_BASE_PROMPT,
+      customDirectives: activeCalibration.customDirectives,
+      sensitivitySettings: activeCalibration.sensitivitySettings,
+      version: activeCalibration.version,
+      updatedAt: activeCalibration.updatedAt
+    }
+  });
+});
+
+app.post('/api/calibration', (req, res) => {
+  try {
+    const { customDirectives, sensitivitySettings } = req.body;
+    if (typeof customDirectives !== 'string') {
+      return res.status(400).json({ success: false, error: 'customDirectives debe ser un string' });
+    }
+    const mergedSettings = {
+      ...activeCalibration.sensitivitySettings,
+      ...(sensitivitySettings || {})
+    };
+    saveCalibration(customDirectives, mergedSettings);
+    res.json({
+      success: true,
+      message: 'Directivas de calibración guardadas y activas en el motor de IA.',
+      data: {
+        basePrompt: DEFAULT_BASE_PROMPT,
+        customDirectives: activeCalibration.customDirectives,
+        sensitivitySettings: activeCalibration.sensitivitySettings,
+        version: activeCalibration.version,
+        updatedAt: activeCalibration.updatedAt
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Error al guardar calibración' });
+  }
+});
+
+app.post('/api/calibration/reset', (req, res) => {
+  try {
+    saveCalibration(DEFAULT_CUSTOM_DIRECTIVES, { ...DEFAULT_SENSITIVITY_SETTINGS });
+    res.json({
+      success: true,
+      message: 'Calibración restablecida a los valores oficiales de fábrica.',
+      data: {
+        basePrompt: DEFAULT_BASE_PROMPT,
+        customDirectives: activeCalibration.customDirectives,
+        sensitivitySettings: activeCalibration.sensitivitySettings,
+        version: activeCalibration.version,
+        updatedAt: activeCalibration.updatedAt
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Error al restablecer calibración' });
+  }
+});
+
+app.post('/api/calibration/chat', async (req, res) => {
+  try {
+    const { message, history = [], customDirectives } = req.body;
+    if (!message || typeof message !== 'string') {
+      return res.status(400).json({ success: false, error: 'Mensaje requerido' });
+    }
+
+    const ai = getGenAI();
+
+    // Fallback if no Gemini API Key is configured in environment
+    if (!ai) {
+      const simulated = generateSimulatedConsultantReply(message, customDirectives || activeCalibration.customDirectives);
+      return res.json({
+        success: true,
+        reply: simulated.reply,
+        suggestedDirective: simulated.suggestedDirective,
+        meta: {
+          engine: 'Consultor Experto Local (Configura GEMINI_API_KEY para motor en vivo)'
+        }
+      });
+    }
+
+    const currentDirectivesToUse = typeof customDirectives === 'string' 
+      ? customDirectives 
+      : activeCalibration.customDirectives;
+
+    const systemInstruction = `Eres el Consultor Senior de Calibración de Speech Analytics y Aseguramiento de Calidad (QA) para Contact Centers de Claro Chile.
+Tu rol es orientar a supervisores, auditores de calidad y desarrolladores a calibrar y enriquecer el Prompt del motor de Inteligencia Artificial que audita las llamadas reales de los asesores.
+
+PAUTA BASE OFICIAL CLARO CHILE:
+- 4 Fases operativas: 1. Bienvenida (nombre, apellido, empresa, confirmación cliente/RUT), 2. Entender y Resolver (parafrasear, sistemas Somos Clave, por favor/gracias), 3. Informar Acción (avisar espera, retomar en <1 min, condiciones comerciales claras), 4. Cierre (preguntas aseguramiento, confirmación, encuesta escala 0-10).
+- Diagnóstico OJT: Madurez (EN_REFUERZO, EN_DESARROLLO, LISTO_PRODUCCION), índice de autonomía %, brecha principal, roleplay de 5 min y feedback pedagógico constructivo.
+- Predicción tNPS Amigable: Desacoplar la molestia hacia la marca del trato humano del asesor novel (score_agente).
+- Detección de alertas: SERNAC, SUBTEL, demandas, fuga a Entel/WOM/Movistar.
+- Contexto cultural chileno: Modismos (boleta, RUT, al tiro, cachái, chato, caleta).
+
+DIRECTIVAS ADICIONALES ACTUALMENTE ACTIVAS:
+${currentDirectivesToUse}
+
+INSTRUCCIONES DE RESPUESTA:
+1. Explica de forma clara, ejecutiva y empática la razón del comportamiento de la IA ante el escenario planteado por el usuario.
+2. Brinda una recomendación fundamentada en mejores prácticas operativas de contact center y Claro Chile.
+3. Si recomiendas una nueva regla o ajuste textual para agregar al prompt del motor, ENTRÉGALO OBLIGATORIAMENTE en un bloque de código delimitado con \`\`\`directive:
+\`\`\`directive
+- [Nombre de la Regla]: [Texto claro y conciso de la directiva lista para incorporar]
+\`\`\`
+De esta manera, la aplicación web mostrará un botón interactivo para que el usuario pueda añadir la directiva a su prompt con un solo clic.
+Mantén un lenguaje profesional, positivo y enfocado en la calibración y mejora continua.`;
+
+    // Format and normalize chat history strictly for Gemini
+    // 1. Must start with role: 'user'
+    // 2. Roles must strictly alternate: user -> model -> user -> model
+    // 3. Last turn must be the current user message
+    const validHistory: Array<{ role: 'user' | 'model'; text: string }> = [];
+    if (Array.isArray(history)) {
+      for (const h of history) {
+        if (h && (h.role === 'user' || h.role === 'model') && typeof h.text === 'string' && h.text.trim()) {
+          validHistory.push({ role: h.role, text: h.text.trim() });
+        }
+      }
+    }
+
+    // Drop leading 'model' turns so contents strictly starts with 'user'
+    while (validHistory.length > 0 && validHistory[0].role === 'model') {
+      validHistory.shift();
+    }
+
+    // Build alternating contents
+    const contents: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
+    for (const item of validHistory) {
+      if (contents.length === 0) {
+        if (item.role === 'user') {
+          contents.push({ role: 'user', parts: [{ text: item.text }] });
+        }
+      } else {
+        const lastTurn = contents[contents.length - 1];
+        if (lastTurn.role === item.role) {
+          lastTurn.parts[0].text += `\n\n${item.text}`;
+        } else {
+          contents.push({ role: item.role, parts: [{ text: item.text }] });
+        }
+      }
+    }
+
+    // Append current user message
+    if (contents.length === 0 || contents[contents.length - 1].role === 'model') {
+      contents.push({
+        role: 'user',
+        parts: [{ text: message }]
+      });
+    } else {
+      contents[contents.length - 1].parts[0].text += `\n\n${message}`;
+    }
+
+    let rawReply = '';
+    let modelUsed = '';
+    const candidateModels = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-3.1-pro-preview'];
+    let lastModelError: any = null;
+
+    for (const modelName of candidateModels) {
+      try {
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents,
+          config: {
+            systemInstruction,
+            temperature: 0.3,
+            maxOutputTokens: 2048,
+          }
+        });
+        const replyText = response.text?.trim();
+        if (replyText) {
+          rawReply = replyText;
+          modelUsed = modelName;
+          break;
+        }
+      } catch (err: any) {
+        lastModelError = err;
+        console.warn(`[Consultor Calibración] Fallo con ${modelName}:`, err?.message || err);
+      }
+    }
+
+    // If all models failed or encountered quota/network limits, provide expert response
+    if (!rawReply) {
+      console.warn('[Consultor Calibración] Activando generador experto de respaldo:', lastModelError?.message);
+      const simulated = generateSimulatedConsultantReply(message, currentDirectivesToUse);
+      return res.json({
+        success: true,
+        reply: simulated.reply,
+        suggestedDirective: simulated.suggestedDirective,
+        meta: {
+          engine: 'Consultor Experto Claro Chile (Modo Seguro)',
+          notice: lastModelError?.message || 'Activado por resiliencia'
+        }
+      });
+    }
+    
+    // Extract directive block if present
+    const directiveMatch = rawReply.match(/```(?:directive)?\s*([\s\S]*?)```/i);
+    const suggestedDirective = directiveMatch ? directiveMatch[1].trim() : undefined;
+
+    res.json({
+      success: true,
+      reply: rawReply,
+      suggestedDirective,
+      meta: {
+        modelUsed
+      }
+    });
+
+  } catch (err: any) {
+    console.error('Error en /api/calibration/chat:', err);
+    const simulated = generateSimulatedConsultantReply(
+      req.body?.message || '', 
+      activeCalibration.customDirectives
+    );
+    res.json({
+      success: true,
+      reply: simulated.reply,
+      suggestedDirective: simulated.suggestedDirective,
+      meta: {
+        fallback: true,
+        error: err?.message
+      }
+    });
+  }
+});
+
 // Schema for Gemini call analysis
 const callAnalysisSchema = {
   type: Type.OBJECT,
@@ -191,25 +631,87 @@ const callAnalysisSchema = {
     cumplimiento_guion: {
       type: Type.OBJECT,
       properties: {
-        saludo_institucional: { type: Type.BOOLEAN, description: 'Saludo institucional con mención de la marca Claro y nombre del asesor' },
-        verificacion_identidad: { type: Type.BOOLEAN, description: 'Verificación de titularidad mediante RUT chileno' },
-        escucha_activa: { type: Type.BOOLEAN, description: 'Escucha activa sin interrupciones ni sobreposiciones' },
-        entrega_ticket_subtel: { type: Type.BOOLEAN, description: 'Entrega de número de orden / reclamo / ticket de atención (obligatorio por normativa SUBTEL)' },
-        despedida_cordial: { type: Type.BOOLEAN, description: 'Despedida cordial de cierre' },
-        ofrecimiento_ayuda: { type: Type.BOOLEAN },
-        politica_privacidad: { type: Type.BOOLEAN }
+        fases: {
+          type: Type.OBJECT,
+          properties: {
+            bienvenida: {
+              type: Type.OBJECT,
+              properties: {
+                generar_experiencia_positiva: { type: Type.BOOLEAN, description: 'Generar experiencia positiva desde el primer contacto' },
+                mencionar_empresa_claro: { type: Type.BOOLEAN, description: 'Mencionar el nombre de la empresa y dar la bienvenida a Claro' },
+                mencionar_nombre_apellido: { type: Type.BOOLEAN, description: 'Mencionar primer nombre y primer apellido del asesor' },
+                confirmar_nombre_cliente_rut_celular: { type: Type.BOOLEAN, description: 'Confirmar nombre del cliente con quien se habla, validando celular o RUT en caso amerite' }
+              },
+              required: ['generar_experiencia_positiva', 'mencionar_empresa_claro', 'mencionar_nombre_apellido', 'confirmar_nombre_cliente_rut_celular']
+            },
+            entender_resolver: {
+              type: Type.OBJECT,
+              properties: {
+                parafrasear_problema: { type: Type.BOOLEAN, description: 'Asegurarse de entender el problema del cliente parafraseando lo que comenta' },
+                ordenar_multiples_requerimientos: { type: Type.BOOLEAN, description: 'Si el cliente tiene más de una necesidad, ordenar los requerimientos y hacerse cargo de cada uno' },
+                utilizar_sistemas_oficiales_somos_clave: { type: Type.BOOLEAN, description: 'Utilizar sistemas oficiales y procedimientos publicados en Somos Clave' },
+                cortesia_por_favor_gracias: { type: Type.BOOLEAN, description: 'Pedir por favor y agradecer al cliente cuando necesitamos que ejecute una instrucción o entregue información' },
+                validacion_identidad: { type: Type.BOOLEAN, description: 'Si el procedimiento lo indica, realizar la validación de identidad' }
+              },
+              required: ['parafrasear_problema', 'ordenar_multiples_requerimientos', 'utilizar_sistemas_oficiales_somos_clave', 'cortesia_por_favor_gracias', 'validacion_identidad']
+            },
+            informar_accion: {
+              type: Type.OBJECT,
+              properties: {
+                indicar_gestion_espera: { type: Type.BOOLEAN, description: 'Indicar al cliente qué gestión se está realizando al pedir momento en espera' },
+                retomar_en_menos_de_un_minuto: { type: Type.BOOLEAN, description: 'Retomar la llamada en menos de un minuto para mantener la comunicación, sin dejar silencios prolongados' },
+                claridad_condiciones_comerciales: { type: Type.BOOLEAN, description: 'Ser claro y específico en informar cambios en condiciones comerciales: costos, proporcionales, descuentos y promociones con vigencia' },
+                resumen_atencion_gestion: { type: Type.BOOLEAN, description: 'Hacer un breve resumen de toda la atención y gestión realizada al terminar la explicación' }
+              },
+              required: ['indicar_gestion_espera', 'retomar_en_menos_de_un_minuto', 'claridad_condiciones_comerciales', 'resumen_atencion_gestion']
+            },
+            cierre: {
+              type: Type.OBJECT,
+              properties: {
+                preguntas_aseguramiento: { type: Type.BOOLEAN, description: 'Realizar preguntas de aseguramiento: alguna otra consulta, quedó clara la info, le puedo ayudar en algo más' },
+                esperar_confirmacion_cliente: { type: Type.BOOLEAN, description: 'Esperar la confirmación activa de parte del cliente antes de cerrar' },
+                guion_encuesta_escala_0_a_10: { type: Type.BOOLEAN, description: 'Mencionar guion de encuesta evaluando atención por mail o SMS en escala de 0 (más baja) a 10 (más alta) y agradecer' }
+              },
+              required: ['preguntas_aseguramiento', 'esperar_confirmacion_cliente', 'guion_encuesta_escala_0_a_10']
+            }
+          },
+          required: ['bienvenida', 'entender_resolver', 'informar_accion', 'cierre']
+        },
+        porcentaje_total: { type: Type.NUMBER, description: 'Porcentaje global de cumplimiento del guion de 0 a 100' },
+        observaciones_auditoria: { type: Type.STRING, description: 'Resumen o diagnóstico de cumplimiento de la pauta' },
+        saludo_institucional: { type: Type.BOOLEAN },
+        verificacion_identidad: { type: Type.BOOLEAN },
+        escucha_activa: { type: Type.BOOLEAN },
+        entrega_ticket_subtel: { type: Type.BOOLEAN },
+        despedida_cordial: { type: Type.BOOLEAN }
       },
-      required: ['saludo_institucional', 'verificacion_identidad', 'escucha_activa', 'entrega_ticket_subtel', 'despedida_cordial']
+      required: ['fases', 'porcentaje_total', 'saludo_institucional', 'verificacion_identidad', 'escucha_activa', 'entrega_ticket_subtel', 'despedida_cordial']
     },
     nps_pronostico: {
       type: Type.OBJECT,
       properties: {
-        score: { type: Type.NUMBER, description: 'Puntaje predicho de 0 a 10' },
+        score: { type: Type.NUMBER, description: 'Puntaje predicho tNPS de 0 a 10 equilibrado y realista' },
+        score_agente: { type: Type.NUMBER, description: 'Puntuación 0 a 10 evaluando únicamente el trato humano, empatía y esfuerzo del asesor novel en OJT' },
         clasificacion: { type: Type.STRING, description: 'DETRACTOR (0-6) | NEUTRO (7-8) | PROMOTOR (9-10)' },
         pregunta: { type: Type.STRING, description: 'Pregunta oficial: ¿Qué tan probable es que recomiendes Claro a un amigo o familiar?' },
-        justificacion: { type: Type.STRING, description: 'Explicación del pronóstico NPS' }
+        justificacion: { type: Type.STRING, description: 'Explicación del pronóstico NPS' },
+        factor_marca_vs_agente: { type: Type.STRING, description: 'Diferenciación entre molestia de fondo con Claro (marca/cobros) vs satisfacción con el trato del asesor' },
+        camino_a_promotor: { type: Type.STRING, description: 'Ajuste específico en OJT para llevar este cliente a Promotor (9-10)' }
       },
-      required: ['score', 'clasificacion', 'justificacion']
+      required: ['score', 'clasificacion', 'justificacion', 'score_agente', 'factor_marca_vs_agente', 'camino_a_promotor']
+    },
+    diagnostico_ojt: {
+      type: Type.OBJECT,
+      properties: {
+        nivel_madurez: { type: Type.STRING, description: 'EN_REFUERZO | EN_DESARROLLO | LISTO_PRODUCCION' },
+        indice_autonomia: { type: Type.NUMBER, description: 'Porcentaje de autonomía 0 a 100 respecto al tutor de piso' },
+        brecha_principal: { type: Type.STRING, description: 'PROCEDIMIENTO_GUION | HERRAMIENTA_SISTEMAS | HABILIDADES_BLANDAS | NINGUNA_DOMINIO' },
+        requiere_intervencion_tutor: { type: Type.BOOLEAN, description: 'Si el tutor de piso debe intervenir o realizar refuerzo inmediato' },
+        roleplay_sugerido: { type: Type.STRING, description: 'Roleplay o simulación de 5 minutos sugerida para el tutor OJT' },
+        feedback_pedagogico: { type: Type.STRING, description: 'Feedback formativo y constructivo para acelerar la curva de aprendizaje' },
+        observacion_piso_real: { type: Type.STRING, description: 'Observación de cómo se desenvolvió ante el cliente chileno real en piso' }
+      },
+      required: ['nivel_madurez', 'indice_autonomia', 'brecha_principal', 'requiere_intervencion_tutor', 'roleplay_sugerido', 'feedback_pedagogico', 'observacion_piso_real']
     },
     silencio_analisis: {
       type: Type.OBJECT,
@@ -272,221 +774,32 @@ const callAnalysisSchema = {
   },
   required: [
     'resumen', 'motivo_categoria', 'motivo_nombre', 'sentimiento_score',
-    'evaluacion_criterios', 'cumplimiento_guion', 'nps_pronostico',
+    'evaluacion_criterios', 'cumplimiento_guion', 'nps_pronostico', 'diagnostico_ojt',
     'silencio_analisis', 'quiebres_atencion', 'feedback_coaching',
     'keywords', 'alertas', 'csat_estimado', 'resolucion_primer_contacto', 'segmentos'
   ]
 };
 
-// Groq Ultra-Fast Speech-to-Text & QA Engine
-async function analyzeWithGroq(
-  groqKey: string,
-  audioBase64: string,
-  fileName: string,
-  agentName: string,
-  queue: string,
-  promptText: string,
-  initialTranscript?: string,
-  agentId?: string
-) {
-  let transcriptText = initialTranscript || '';
-  let durationSec = 180;
-  let whisperSegments: any[] = [];
+// Token efficiency cache and metrics tracking
+const callAnalysisCache = new Map<string, any>();
+const tokenMetrics = {
+  totalCallsAudited: 0,
+  cachedCallsServed: 0,
+  promptTokensUsed: 0,
+  candidateTokensUsed: 0,
+  totalTokensUsed: 0,
+  cachedTokensSaved: 0,
+};
 
-  // Step 1: Transcribe with Whisper Large v3 Turbo on Groq
-  if (audioBase64 && !transcriptText) {
-    const audioBuf = Buffer.from(audioBase64, 'base64');
-    const audioBlob = new Blob([audioBuf], { type: 'audio/wav' });
-    const formData = new FormData();
-    formData.append('file', audioBlob, fileName || 'audio.wav');
-    formData.append('model', 'whisper-large-v3-turbo');
-    formData.append('language', 'es');
-    formData.append('response_format', 'verbose_json');
+// Endpoint to monitor token optimization metrics
+app.get('/api/token-metrics', (_req, res) => {
+  res.json({
+    success: true,
+    data: tokenMetrics
+  });
+});
 
-    const whisperRes = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${groqKey}`
-      },
-      body: formData
-    });
-
-    if (!whisperRes.ok) {
-      const errText = await whisperRes.text();
-      throw new Error(`Groq Whisper error (${whisperRes.status}): ${errText}`);
-    }
-
-    const whisperData = (await whisperRes.json()) as any;
-    transcriptText = whisperData.text || '';
-    durationSec = Math.max(10, Math.round(whisperData.duration || 180));
-
-    if (Array.isArray(whisperData.segments)) {
-      whisperSegments = whisperData.segments.map((seg: any, idx: number) => ({
-        id: `sg-${idx + 1}`,
-        hablante: idx % 2 === 0 ? 'agente' : 'cliente',
-        inicio: Math.round(seg.start || 0),
-        fin: Math.round(seg.end || 5),
-        texto: seg.text?.trim() || '',
-        sentimientoScore: 0.0
-      }));
-    }
-  }
-
-  // Step 2: Perform QA Speech Analytics with LLaMA 3.3 70B on Groq
-  const auditPrompt = `${promptText}
-
-TRANSCRIPCIÓN REAL LITERAL OBTENIDA VÍA WHISPER:
-${transcriptText || 'Audio de llamada de contact center.'}
-
-Responde ÚNICAMENTE con un JSON válido que contenga la estructura exacta solicitada:
-{
-  "resumen": "...",
-  "motivo_categoria": "soporte|ventas|reclamos|bajas|facturacion",
-  "motivo_nombre": "...",
-  "sentimiento_score": 0.0,
-  "evaluacion_criterios": {
-    "amabilidad_empatia": { "nota": 85, "diagnostico": "..." },
-    "seguridad_expresarse": { "nota": 90, "diagnostico": "..." },
-    "claridad_informacion": { "nota": 80, "diagnostico": "..." },
-    "tiempos_espera_hold": { "nota": 75, "diagnostico": "..." },
-    "eficiencia_tmo": { "nota": 85, "diagnostico": "..." }
-  },
-  "cumplimiento_guion": {
-    "saludo_institucional": true,
-    "verificacion_identidad": true,
-    "escucha_activa": true,
-    "entrega_ticket_subtel": true,
-    "despedida_cordial": true,
-    "ofrecimiento_ayuda": true,
-    "politica_privacidad": true
-  },
-  "nps_pronostico": {
-    "score": 8,
-    "clasificacion": "PROMOTOR",
-    "pregunta": "¿Qué tan probable es que recomiendes Claro a un amigo o familiar?",
-    "justificacion": "..."
-  },
-  "silencio_analisis": {
-    "duracion_total_segundos": ${durationSec},
-    "tiempo_ivr_segundos": 45,
-    "tiempo_agente_segundos": ${durationSec - 45},
-    "silencio_agente_segundos": 15,
-    "porcentaje_silencio": 8,
-    "nivel_silencio": "ÓPTIMO",
-    "diagnostico_silencio": "..."
-  },
-  "quiebres_atencion": [],
-  "feedback_coaching": {
-    "fortalezas": ["..."],
-    "oportunidades_mejora": ["..."],
-    "guion_sugerido_alternativo": "...",
-    "plan_accion": "..."
-  },
-  "keywords": ["Claro Chile", "RUT", "Boleta"],
-  "alertas": [],
-  "csat_estimado": 4,
-  "resolucion_primer_contacto": true,
-  "agente_nombre_detectado": "${agentName}",
-  "cliente_nombre_detectado": "Cliente Claro",
-  "segmentos": []
-}`;
-
-  const candidateGroqModels = [
-    'llama-3.3-70b-versatile',
-    'llama-3.1-8b-instant',
-    'mixtral-8x7b-32768',
-    'gemma2-9b-it'
-  ];
-
-  let rawJson = '';
-  let modelUsed = '';
-
-  for (const modelCandidate of candidateGroqModels) {
-    try {
-      const chatRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${groqKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: modelCandidate,
-          messages: [
-            {
-              role: 'system',
-              content: 'Eres el auditor principal de Calidad y Speech Analytics para Claro Chile. Devuelve tu análisis exclusivamente en formato JSON estructurado.'
-            },
-            {
-              role: 'user',
-              content: auditPrompt
-            }
-          ],
-          response_format: { type: 'json_object' },
-          temperature: 0.1
-        })
-      });
-
-      if (chatRes.ok) {
-        const chatData = (await chatRes.json()) as any;
-        rawJson = chatData.choices?.[0]?.message?.content || '{}';
-        modelUsed = modelCandidate;
-        break;
-      } else {
-        const errTxt = await chatRes.text();
-        console.warn(`[Groq Model Candidate] ${modelCandidate} failed (${chatRes.status}): ${errTxt}`);
-      }
-    } catch (e: any) {
-      console.warn(`[Groq Model Candidate] Error with ${modelCandidate}:`, e?.message || e);
-    }
-  }
-
-  if (!rawJson) {
-    throw new Error('Ningún modelo de chat de Groq respondió con éxito');
-  }
-
-  const parsed = JSON.parse(rawJson);
-
-  const finalSegments = (parsed.segmentos && parsed.segmentos.length > 0)
-    ? parsed.segmentos
-    : (whisperSegments.length > 0 ? whisperSegments : [
-        { id: 'sg1', hablante: 'agente', inicio: 0, fin: 5, texto: transcriptText.slice(0, 100), sentimientoScore: 0.2 }
-      ]);
-
-  const crits = parsed.evaluacion_criterios;
-  const avgScore = crits ? Math.round(
-    (crits.amabilidad_empatia.nota +
-     crits.seguridad_expresarse.nota +
-     crits.claridad_informacion.nota +
-     crits.tiempos_espera_hold.nota +
-     crits.eficiencia_tmo.nota) / 5
-  ) : 80;
-
-  const completeRecord = {
-    id: `call-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
-    codigo_llamada: `REC-2026-CHILE-${Math.floor(1000 + Math.random() * 9000)}`,
-    fecha_hora: new Date().toISOString().replace('T', ' ').substring(0, 16),
-    file_name: fileName,
-    agente_nombre: parsed.agente_nombre_detectado || agentName,
-    agente_id: agentId || (parsed.agente_id_detectado || `AG-${Math.floor(7000 + Math.random() * 3000)}`),
-    cliente_nombre: parsed.cliente_nombre_detectado || 'Cliente Claro',
-    cliente_telefono: '+56 9 ' + Math.floor(60000000 + Math.random() * 39999999),
-    cola_atencion: queue,
-    duracion_total: formatSeconds(parsed.silencio_analisis?.duracion_total_segundos || durationSec),
-    duracion_segundos: parsed.silencio_analisis?.duracion_total_segundos || durationSec,
-    qa_score_global: avgScore,
-    sentimiento_label: (parsed.sentimiento_score ?? 0) > 0.2 ? 'Positivo' : (parsed.sentimiento_score ?? 0) < -0.2 ? 'Negativo' : 'Neutro',
-    modelo_procesado: 'Groq (Whisper-Large-v3 + Llama-3.3-70b)',
-    ...parsed,
-    segmentos: finalSegments,
-    transcripcion: {
-      segmentos: finalSegments
-    }
-  };
-
-  return completeRecord;
-}
-
-// Analyze call endpoint with Groq primary and Gemini Multi-Key fallback
+// Analyze call endpoint with Level 1 cascade & exponential backoff
 app.post('/api/analyze-call', async (req, res) => {
   const {
     audioBase64,
@@ -494,68 +807,63 @@ app.post('/api/analyze-call', async (req, res) => {
     fileName = 'grabacion.wav',
     transcriptText,
     agentName = 'Asesor Claro',
-    agentId,
     queue = 'Exclusivo Postpago Chile',
-    requestedModelCascade = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-flash-latest']
+    requestedModelCascade = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-3.1-pro-preview']
   } = req.body;
 
-  const prompt = `Eres un auditor experto en Speech Analytics y Aseguramiento de la Calidad (QA) para Contact Centers de Claro en Chile.
+  // 1. Deduplication Cache: Avoid calling Gemini and spending 100% of tokens if call was already evaluated
+  const cacheKey = audioBase64 
+    ? `${fileName}_len${audioBase64.length}_${audioBase64.slice(0, 60)}_${audioBase64.slice(-60)}` 
+    : (transcriptText ? `transcript_${transcriptText.length}_${transcriptText.slice(0, 100)}` : '');
 
-REGLA SUPREMA - TRANSCRIPCIÓN REAL Y VERÍDICA (ESTRICTAMENTE PROHIBIDO CONTENIDO GENÉRICO O PLANTILLAS):
-- Tu función fundamental es escuchar atentamente el archivo de audio adjunto y transcribir LITERALMENTE lo que se habla en la grabación real.
-- QUEDA ESTRICTAMENTE PROHIBIDO inventar diálogos, usar plantillas prefabricadas o generar textos genéricos de ejemplo como "Juan", "Pedro Pérez", "RUT 12.345.678-K", o conversaciones de muestra.
-- Debes transcribir cada palabra exacta, modismo, pausa y respuesta que se escuche en la llamada real de principio a fin.
-- Si en la llamada los interlocutores dicen sus nombres reales, extráelos en 'agente_nombre_detectado' y 'cliente_nombre_detectado'.
+  if (cacheKey && callAnalysisCache.has(cacheKey)) {
+    tokenMetrics.cachedCallsServed++;
+    tokenMetrics.cachedTokensSaved += 4500; // Estimated average saved tokens per cached call
+    const cached = callAnalysisCache.get(cacheKey);
+    return res.json({
+      success: true,
+      data: {
+        ...cached,
+        id: `call-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+        codigo_llamada: cached.codigo_llamada || `REC-2026-CHILE-${Math.floor(1000 + Math.random() * 9000)}`,
+        fecha_hora: new Date().toISOString().replace('T', ' ').substring(0, 16),
+      },
+      meta: {
+        modelUsed: cached.modelo_procesado || 'gemini-3.8-flash',
+        cached: true,
+        tokensSaved: true,
+        tokenUsage: {
+          promptTokenCount: 0,
+          candidatesTokenCount: 0,
+          totalTokenCount: 0,
+          cachedContentTokenCount: 4500
+        }
+      }
+    });
+  }
 
-CONTEXTO CULTURAL Y OPERATIVO HÍBRIDO (CHILENO - PERUANO):
-- La atención en los Contact Centers de Claro para Chile involucra habitualmente una interacción híbrida:
-  * ASESORES: Generalmente con acento peruano neutro institucional o formal, protocolos de atención al cliente de telecomunicaciones, modismos de servicio cordiales.
-  * CLIENTES: Ciudadanos chilenos con modismos locales, acento chileno, ritmo y cadencia rápida.
-- Comprende y transcribe fielmente el vocabulario y términos chilenos:
-  * "Boleta" = Cuenta / Factura mensual.
-  * "RUT" = Documento de identidad nacional chileno.
-  * "Al tiro" = De inmediato / Rápidamente.
-  * "Cachar / Cachái" = Entender / ¿Entiendes?
-  * "Chato / Chata" = Molesto(a) / Cansado(a) ("estoy chato con el cobro").
-  * "Caleta" = Mucho / Bastante tiempo.
-  * "Bajar el plan / Portabilidad / Cortar la línea" = Gestiones comerciales.
-  * "Banda ancha / Factibilidad / ONT / Router" = Términos técnicos.
+  const ai = getGenAI();
 
-ESTRUCTURA DE SEGMENTOS Y DIÁLOGOS OBLIGATORIA:
-- Debes segmentar la llamada cronológicamente asignando cada intervención a:
-  * 'hablante': "agente" o "cliente"
-  * 'inicio': segundo exacto en que comienza a hablar (timestamp en segundos, ej: 0, 12, 45)
-  * 'fin': segundo exacto en que termina de hablar
-  * 'texto': transcripción literal de lo que dijo en ese turno (palabra por palabra)
-  * 'sentimientoScore': valor entre -1.0 (muy molesto/frustrado) y 1.0 (muy satisfecho/amable)
-- No resumas la conversación en 3 o 4 líneas. Transcribe todos y cada uno de los turnos de diálogo que ocurran en el audio real.
+  // If no Gemini API key, generate realistic intelligent QA analysis directly
+  if (!ai) {
+    const fallbackResult = generateRealisticMockAnalysis(fileName, agentName, queue, transcriptText);
+    return res.json({
+      success: true,
+      data: fallbackResult,
+      meta: {
+        engine: 'Intelligent Heuristics (Configure GEMINI_API_KEY for live AI)',
+        modelUsed: 'local-qa-engine',
+        retries: 0
+      }
+    });
+  }
 
-DETECCIÓN DE ALERTAS CRÍTICAS:
-- Registra en 'alertas' si el cliente menciona:
-  * "SERNAC" (Servicio Nacional del Consumidor).
-  * "SUBTEL" (Subsecretaría de Telecomunicaciones).
-  * "Demanda", "Abogado", "Denuncia", "Estafa", "Burla", "Colmo".
-  * Intención de fuga o portabilidad a Entel, Movistar o WOM.
+  const prompt = getActiveFullPrompt();
 
-VALIDACIÓN DE GUION INSTITUCIONAL CHILENO:
-- Saludo institucional (mención de la marca Claro y nombre del asesor) -> cumplimiento_guion.saludo_institucional
-- Verificación de titularidad mediante RUT chileno -> cumplimiento_guion.verificacion_identidad
-- Escucha activa sin interrupciones -> cumplimiento_guion.escucha_activa
-- Entrega de número de orden / reclamo / ticket de atención (obligatorio por normativa SUBTEL) -> cumplimiento_guion.entrega_ticket_subtel
-- Despedida cordial -> cumplimiento_guion.despedida_cordial
-
-AUDITORÍA DE CALIDAD Y SPEECH ANALYTICS (CLARO CHILE):
-1. Evalúa los 5 criterios de calidad de 0 a 100: Amabilidad/Empatía, Seguridad al expresarse, Claridad de información, Tiempos de espera (hold), y Eficiencia TMO con diagnósticos descriptivos.
-2. Identifica los QUIEBRES de los asesores a nivel de atención (momentos críticos donde el asesor fue cortante, condescendiente, interrumpió al cliente, desinformó, o dejó silencios sin cortesía).
-3. Pronóstico de NPS con la pregunta oficial: "¿Qué tan probable es que recomiendes Claro a un amigo o familiar? Considerando una escala de 0 a 10, donde 0 es 'Nada probable' y 10 es 'Muy probable'". Clasifica en DETRACTOR (0-6), NEUTRO (7-8) o PROMOTOR (9-10), justificando ampliamente el motivo de la calificación.
-4. Tiempo de Silencio Conversacional: Evalúa el silencio considerando ÚNICAMENTE desde que le ingresa la llamada al agente y puede interactuar, separándolo del IVR previo.
-5. Plan de coaching y feedback accionable para el asesor, incluyendo guion sugerido alternativo y plan de acción.`;
-
-  // 1. First & Primary Priority: Google Gemini Pay-As-You-Go (Direct official key)
-  const apiKeys = getApiKeys();
+  // Resilience Cascade loop
   const models = requestedModelCascade && requestedModelCascade.length > 0 
     ? requestedModelCascade 
-    : ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-flash-latest'];
+    : ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-3.1-pro-preview'];
 
   let lastErrorDetail = '';
   let retryCount = 0;
@@ -566,186 +874,244 @@ AUDITORÍA DE CALIDAD Y SPEECH ANALYTICS (CLARO CHILE):
     transcodedAudioBase64 = await transcodeToCanonicalWav(audioBase64);
   }
 
-  if (apiKeys.length > 0) {
-    for (const model of models) {
-      for (let keyIdx = 0; keyIdx < apiKeys.length; keyIdx++) {
-        const activeKey = apiKeys[keyIdx];
-        const ai = getGenAIClient(activeKey);
-
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-          const parts: Array<Record<string, unknown>> = [];
-          
-          if (transcodedAudioBase64) {
-            parts.push({
-              inlineData: {
-                data: transcodedAudioBase64,
-                mimeType: 'audio/wav',
-              }
-            });
-          }
-          
-          if (transcriptText) {
-            parts.push({ text: `Transcripción o contexto inicial de la llamada:\n${transcriptText}` });
-          }
-
-          parts.push({ text: prompt });
-
-          const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Model timeout after 120s')), 120000)
-          );
-
-          const generatePromise = ai.models.generateContent({
-            model,
-            contents: parts,
-            config: {
-              temperature: 0.1,
-              maxOutputTokens: 16384,
-              responseMimeType: 'application/json',
-              responseSchema: callAnalysisSchema,
+  for (const model of models) {
+    // Up to 3 retries per model with exponential backoff for 429
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const parts: Array<Record<string, unknown>> = [];
+        
+        if (transcodedAudioBase64) {
+          parts.push({
+            inlineData: {
+              data: transcodedAudioBase64,
+              mimeType: 'audio/wav',
             }
           });
+        }
+        
+        if (transcriptText) {
+          parts.push({ text: `Transcripción o contexto inicial de la llamada:\n${transcriptText}` });
+        }
 
-          const response = (await Promise.race([generatePromise, timeoutPromise])) as { text?: string };
+        // Focused user-turn instruction (prompt separated into systemInstruction for automatic caching)
+        parts.push({ 
+          text: `Audita la llamada de Claro Chile para el asesor "${agentName}" en la cola "${queue}". Evalúa minuciosamente las 4 fases normativas y entrega el resultado JSON según el responseSchema.` 
+        });
 
-          const rawText = response.text?.trim() || '{}';
-          const parsed = JSON.parse(rawText);
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Model timeout after 120s')), 120000)
+        );
 
-          // Normalize QA score global
-          const crits = parsed.evaluacion_criterios;
-          const avgScore = crits ? Math.round(
-            (crits.amabilidad_empatia.nota +
-             crits.seguridad_expresarse.nota +
-             crits.claridad_informacion.nota +
-             crits.tiempos_espera_hold.nota +
-             crits.eficiencia_tmo.nota) / 5
-          ) : 70;
+        // Optimized token generation config:
+        // - systemInstruction separates static directives enabling Gemini prefix caching
+        // - maxOutputTokens bounded to 8192 to prevent runaway token inflation
+        const generatePromise = ai.models.generateContent({
+          model,
+          contents: { parts },
+          config: {
+            systemInstruction: prompt,
+            temperature: 0.1,
+            maxOutputTokens: 8192,
+            responseMimeType: 'application/json',
+            responseSchema: callAnalysisSchema,
+          }
+        });
 
-          const rawSegs = parsed.segmentos || parsed.transcripcion?.segmentos || [];
-          const normalizedSegmentos = rawSegs.map((seg: any, idx: number) => ({
-            id: seg.id || `seg-${idx + 1}`,
-            hablante: seg.hablante === 'cliente' ? 'cliente' : 'agente',
-            inicio: typeof seg.inicio === 'number' ? seg.inicio : 0,
-            fin: typeof seg.fin === 'number' ? seg.fin : 5,
-            texto: seg.texto || '',
-            sentimientoScore: typeof seg.sentimientoScore === 'number' ? seg.sentimientoScore : 0
-          }));
-
-          const detectedAgent = parsed.agente_nombre_detectado && parsed.agente_nombre_detectado !== 'Asesor' 
-            ? parsed.agente_nombre_detectado 
-            : agentName;
-          const detectedCustomer = parsed.cliente_nombre_detectado && parsed.cliente_nombre_detectado !== 'Cliente'
-            ? parsed.cliente_nombre_detectado
-            : 'Cliente Claro';
-
-          const completeRecord = {
-            id: `call-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
-            codigo_llamada: `REC-2026-CHILE-${Math.floor(1000 + Math.random() * 9000)}`,
-            fecha_hora: new Date().toISOString().replace('T', ' ').substring(0, 16),
-            file_name: fileName,
-            agente_nombre: detectedAgent,
-            agente_id: agentId || (parsed.agente_id_detectado || `AG-${Math.floor(7000 + Math.random() * 3000)}`),
-            cliente_nombre: detectedCustomer,
-            cliente_telefono: '+56 9 ' + Math.floor(60000000 + Math.random() * 39999999),
-            cola_atencion: queue,
-            duracion_total: formatSeconds(parsed.silencio_analisis?.duracion_total_segundos || 420),
-            duracion_segundos: parsed.silencio_analisis?.duracion_total_segundos || 420,
-            qa_score_global: avgScore,
-            sentimiento_label: parsed.sentimiento_score > 0.2 ? 'Positivo' : parsed.sentimiento_score < -0.2 ? 'Negativo' : 'Neutro',
-            modelo_procesado: model,
-            ...parsed,
-            segmentos: normalizedSegmentos,
-            transcripcion: {
-              segmentos: normalizedSegmentos
-            }
+        const response = (await Promise.race([generatePromise, timeoutPromise])) as { 
+          text?: string;
+          usageMetadata?: {
+            promptTokenCount?: number;
+            candidatesTokenCount?: number;
+            totalTokenCount?: number;
+            cachedContentTokenCount?: number;
           };
+        };
 
-          return res.json({
-            success: true,
-            data: completeRecord,
-            meta: {
-              modelUsed: model,
-              apiKeyHarnessSlot: keyIdx + 1,
-              totalKeysConfigured: apiKeys.length,
-              attempts: attempt,
-              totalRetries: retryCount
+        const rawText = response.text?.trim() || '{}';
+        const parsed = JSON.parse(rawText);
+
+        // Normalize QA score global
+        const crits = parsed.evaluacion_criterios;
+        const avgScore = crits ? Math.round(
+          (crits.amabilidad_empatia.nota +
+           crits.seguridad_expresarse.nota +
+           crits.claridad_informacion.nota +
+           crits.tiempos_espera_hold.nota +
+           crits.eficiencia_tmo.nota) / 5
+        ) : 70;
+
+        const rawSegs = parsed.segmentos || parsed.transcripcion?.segmentos || [];
+        const normalizedSegmentos = rawSegs.map((seg: any, idx: number) => ({
+          id: seg.id || `seg-${idx + 1}`,
+          hablante: seg.hablante === 'cliente' ? 'cliente' : 'agente',
+          inicio: typeof seg.inicio === 'number' ? seg.inicio : 0,
+          fin: typeof seg.fin === 'number' ? seg.fin : 5,
+          texto: seg.texto || '',
+          sentimientoScore: typeof seg.sentimientoScore === 'number' ? seg.sentimientoScore : 0
+        }));
+
+        const detectedAgent = parsed.agente_nombre_detectado && parsed.agente_nombre_detectado !== 'Asesor' 
+          ? parsed.agente_nombre_detectado 
+          : agentName;
+        const detectedCustomer = parsed.cliente_nombre_detectado && parsed.cliente_nombre_detectado !== 'Cliente'
+          ? parsed.cliente_nombre_detectado
+          : 'Cliente Claro';
+
+        // Normalize 4-phase compliance scoring
+        const cg = parsed.cumplimiento_guion || {};
+        const f = cg.fases || {};
+        const b = f.bienvenida || {};
+        const er = f.entender_resolver || {};
+        const ia = f.informar_accion || {};
+        const c = f.cierre || {};
+
+        const bCount = [b.generar_experiencia_positiva, b.mencionar_empresa_claro, b.mencionar_nombre_apellido, b.confirmar_nombre_cliente_rut_celular].filter(Boolean).length;
+        const bPct = Math.round((bCount / 4) * 100);
+
+        const erCount = [er.parafrasear_problema, er.ordenar_multiples_requerimientos, er.utilizar_sistemas_oficiales_somos_clave, er.cortesia_por_favor_gracias, er.validacion_identidad].filter(Boolean).length;
+        const erPct = Math.round((erCount / 5) * 100);
+
+        const iaCount = [ia.indicar_gestion_espera, ia.retomar_en_menos_de_un_minuto, ia.claridad_condiciones_comerciales, ia.resumen_atencion_gestion].filter(Boolean).length;
+        const iaPct = Math.round((iaCount / 4) * 100);
+
+        const cCount = [c.preguntas_aseguramiento, c.esperar_confirmacion_cliente, c.guion_encuesta_escala_0_a_10].filter(Boolean).length;
+        const cPct = Math.round((cCount / 3) * 100);
+
+        const totalItems = 16;
+        const totalChecked = bCount + erCount + iaCount + cCount;
+        const calculatedTotalPct = Math.round((totalChecked / totalItems) * 100);
+
+        const normalizedCumplimientoGuion = {
+          fases: {
+            bienvenida: {
+              generar_experiencia_positiva: !!b.generar_experiencia_positiva,
+              mencionar_empresa_claro: !!b.mencionar_empresa_claro,
+              mencionar_nombre_apellido: !!b.mencionar_nombre_apellido,
+              confirmar_nombre_cliente_rut_celular: !!b.confirmar_nombre_cliente_rut_celular,
+              porcentaje: bPct
+            },
+            entender_resolver: {
+              parafrasear_problema: !!er.parafrasear_problema,
+              ordenar_multiples_requerimientos: !!er.ordenar_multiples_requerimientos,
+              utilizar_sistemas_oficiales_somos_clave: !!er.utilizar_sistemas_oficiales_somos_clave,
+              cortesia_por_favor_gracias: !!er.cortesia_por_favor_gracias,
+              validacion_identidad: !!er.validacion_identidad,
+              porcentaje: erPct
+            },
+            informar_accion: {
+              indicar_gestion_espera: !!ia.indicar_gestion_espera,
+              retomar_en_menos_de_un_minuto: !!ia.retomar_en_menos_de_un_minuto,
+              claridad_condiciones_comerciales: !!ia.claridad_condiciones_comerciales,
+              resumen_atencion_gestion: !!ia.resumen_atencion_gestion,
+              porcentaje: iaPct
+            },
+            cierre: {
+              preguntas_aseguramiento: !!c.preguntas_aseguramiento,
+              esperar_confirmacion_cliente: !!c.esperar_confirmacion_cliente,
+              guion_encuesta_escala_0_a_10: !!c.guion_encuesta_escala_0_a_10,
+              porcentaje: cPct
             }
+          },
+          porcentaje_total: typeof cg.porcentaje_total === 'number' ? cg.porcentaje_total : calculatedTotalPct,
+          observaciones_auditoria: cg.observaciones_auditoria || '',
+          saludo_institucional: !!b.mencionar_empresa_claro && !!b.mencionar_nombre_apellido,
+          verificacion_identidad: !!b.confirmar_nombre_cliente_rut_celular || !!er.validacion_identidad,
+          escucha_activa: !!er.parafrasear_problema,
+          entrega_ticket_subtel: typeof cg.entrega_ticket_subtel === 'boolean' ? cg.entrega_ticket_subtel : true,
+          despedida_cordial: !!c.guion_encuesta_escala_0_a_10 || !!c.preguntas_aseguramiento,
+          ofrecimiento_ayuda: !!c.preguntas_aseguramiento,
+          politica_privacidad: true
+        };
+
+        const completeRecord = {
+          id: `call-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+          codigo_llamada: `REC-2026-CHILE-${Math.floor(1000 + Math.random() * 9000)}`,
+          fecha_hora: new Date().toISOString().replace('T', ' ').substring(0, 16),
+          agente_nombre: detectedAgent,
+          agente_id: `AG-${Math.floor(7000 + Math.random() * 3000)}`,
+          cliente_nombre: detectedCustomer,
+          cliente_telefono: '+56 9 ' + Math.floor(60000000 + Math.random() * 39999999),
+          cola_atencion: queue,
+          duracion_total: formatSeconds(parsed.silencio_analisis?.duracion_total_segundos || 420),
+          duracion_segundos: parsed.silencio_analisis?.duracion_total_segundos || 420,
+          qa_score_global: avgScore,
+          sentimiento_label: parsed.sentimiento_score > 0.2 ? 'Positivo' : parsed.sentimiento_score < -0.2 ? 'Negativo' : 'Neutro',
+          modelo_procesado: model,
+          ...parsed,
+          cumplimiento_guion: normalizedCumplimientoGuion,
+          segmentos: normalizedSegmentos,
+          transcripcion: {
+            segmentos: normalizedSegmentos
+          }
+        };
+
+        if (cacheKey) {
+          callAnalysisCache.set(cacheKey, completeRecord);
+        }
+
+        const u = response.usageMetadata;
+        if (u) {
+          tokenMetrics.totalCallsAudited++;
+          tokenMetrics.promptTokensUsed += u.promptTokenCount || 0;
+          tokenMetrics.candidateTokensUsed += u.candidatesTokenCount || 0;
+          tokenMetrics.totalTokensUsed += u.totalTokenCount || 0;
+          tokenMetrics.cachedTokensSaved += u.cachedContentTokenCount || 0;
+        }
+
+        return res.json({
+          success: true,
+          data: completeRecord,
+          meta: {
+            modelUsed: model,
+            attempts: attempt,
+            totalRetries: retryCount,
+            tokenUsage: u || null,
+            cached: false
+          }
+        });
+
+      } catch (err: unknown) {
+        const error = err as { status?: number; message?: string };
+        const status = error.status || 500;
+        const errMsg = error.message || String(err);
+        lastErrorDetail = errMsg;
+
+        // Check for 401/403 Invalid API key
+        if (status === 401 || status === 403 || errMsg.includes('API_KEY_INVALID') || errMsg.includes('unregistered project')) {
+          return res.status(401).json({
+            success: false,
+            errorType: 'API_KEY_INVALID',
+            message: 'La clave de Gemini API es inválida o no tiene permisos. Por favor revísala en Google AI Studio.',
+            setupUrl: 'https://aistudio.google.com/app/apikey'
           });
+        }
 
-        } catch (err: unknown) {
-          const error = err as { status?: number; message?: string };
-          const status = error.status || 500;
-          const errMsg = error.message || String(err);
-          lastErrorDetail = errMsg;
-
-          // Check for 401/403 Invalid API key
-          if (status === 401 || status === 403 || errMsg.includes('API_KEY_INVALID') || errMsg.includes('unregistered project')) {
-            console.warn(`[API Key Harness] Key #${keyIdx + 1} inválida (${errMsg}). Rotando a la siguiente API key del arnés...`);
-            break; // Try next API key
-          }
-
-          // Check for 429 Too Many Requests
-          const is429 = status === 429 || errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('Too Many Requests');
-          
-          if (is429) {
-            retryCount++;
-            console.warn(`[API Key Harness] Key #${keyIdx + 1} agotó cuota 429 para ${model}. Rotando al instante a siguiente Key del arnés...`);
-            break; // Immediately try next API key in harness
-          } else {
-            console.warn(`[Model Error] ${model} (Key #${keyIdx + 1}): ${errMsg}`);
-            break; // Try next key / next model
-          }
+        // Check for 429 Too Many Requests
+        const is429 = status === 429 || errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('Too Many Requests');
+        
+        if (is429) {
+          retryCount++;
+          // Exponential backoff: 2s -> 4s -> 8s with jitter
+          const backoffTime = Math.pow(2, attempt) * 1000;
+          console.warn(`[429 Quota Exceeded] Modelo ${model}, intento ${attempt}/3. Esperando ${backoffTime}ms...`);
+          await sleep(backoffTime);
+          continue; // retry same model
+        } else {
+          // Other error: break to next model in cascade
+          console.warn(`[Model Error] ${model}: ${errMsg}. Pasando al siguiente modelo en cascada...`);
+          break;
         }
       }
     }
   }
-}
 
-  // 2. Secondary fallback: Groq (only if Gemini was not available or failed)
-  const groqKey = process.env.GROQ_API_KEY;
-  if (groqKey) {
-    try {
-      console.log('[Engine Fallback] Intentando con Groq...');
-      const groqResult = await analyzeWithGroq(
-        groqKey,
-        audioBase64,
-        fileName,
-        agentName,
-        queue,
-        prompt,
-        transcriptText,
-        agentId
-      );
-      return res.status(200).json({
-        success: true,
-        data: groqResult,
-        meta: {
-          engine: 'Groq Ultra-Fast (Whisper-v3 + LLaMA-3.3-70B)',
-          modelUsed: 'whisper-large-v3-turbo / llama-3.3-70b',
-          latency: 'ultra-low'
-        }
-      });
-    } catch (groqErr: any) {
-      console.warn('[Engine Fallback] Groq falló:', groqErr?.message || groqErr);
-    }
-  }
-
-  // If all models and API keys exhausted retries:
-  const isRateLimit = lastErrorDetail.includes('429') || 
-                      lastErrorDetail.includes('RESOURCE_EXHAUSTED') || 
-                      lastErrorDetail.toLowerCase().includes('quota') ||
-                      lastErrorDetail.toLowerCase().includes('rate limit');
-
-  const httpStatus = isRateLimit ? 429 : 500;
-
-  return res.status(httpStatus).json({
+  // If all models in cascade exhausted retries:
+  res.status(429).json({
     success: false,
-    errorType: isRateLimit ? 'QUOTA_EXHAUSTED_ALL_MODELS' : 'ANALYSIS_ERROR',
-    message: isRateLimit
-      ? 'Se superó el límite de peticiones por minuto en Gemini Pay-As-You-Go. El audio se resguarda en la cola diferida.'
-      : `Error al procesar la llamada: ${lastErrorDetail || 'Error desconocido'}`,
+    errorType: 'QUOTA_EXHAUSTED_ALL_MODELS',
+    message: 'Se agotó la cuota de peticiones en todos los modelos en cascada (HTTP 429). El audio puede ser enviado a la cola diferida de reintento automático.',
     lastError: lastErrorDetail,
-    allowDeferredQueue: isRateLimit
+    allowDeferredQueue: true
   });
 });
 
@@ -756,7 +1122,7 @@ function formatSeconds(secs: number): string {
 }
 
 // Realistic fallback generator when API key is not present
-function generateRealisticMockAnalysis(fileName: string, agentName: string, queue: string, transcriptText?: string, agentId?: string) {
+function generateRealisticMockAnalysis(fileName: string, agentName: string, queue: string, transcriptText?: string) {
   const isDetractor = fileName.toLowerCase().includes('reclamo') || fileName.toLowerCase().includes('boleta') || fileName.toLowerCase().includes('baja');
   const durSec = 380 + Math.floor(Math.random() * 200);
   const ivrSec = 90 + Math.floor(Math.random() * 150);
@@ -767,9 +1133,8 @@ function generateRealisticMockAnalysis(fileName: string, agentName: string, queu
     id: `call-${Date.now()}`,
     codigo_llamada: `REC-2026-CHILE-${Math.floor(2000 + Math.random() * 7000)}`,
     fecha_hora: new Date().toISOString().replace('T', ' ').substring(0, 16),
-    file_name: fileName,
     agente_nombre: agentName,
-    agente_id: agentId || `AG-${Math.floor(7000 + Math.random() * 3000)}`,
+    agente_id: `AG-${Math.floor(7000 + Math.random() * 3000)}`,
     cliente_nombre: 'Carolina Valenzuela P.',
     cliente_telefono: '+56 9 7842 1190',
     cola_atencion: queue,
@@ -816,6 +1181,40 @@ function generateRealisticMockAnalysis(fileName: string, agentName: string, queu
       }
     },
     cumplimiento_guion: {
+      fases: {
+        bienvenida: {
+          generar_experiencia_positiva: true,
+          mencionar_empresa_claro: true,
+          mencionar_nombre_apellido: !isDetractor,
+          confirmar_nombre_cliente_rut_celular: true,
+          porcentaje: !isDetractor ? 100 : 75
+        },
+        entender_resolver: {
+          parafrasear_problema: !isDetractor,
+          ordenar_multiples_requerimientos: true,
+          utilizar_sistemas_oficiales_somos_clave: true,
+          cortesia_por_favor_gracias: !isDetractor,
+          validacion_identidad: true,
+          porcentaje: !isDetractor ? 100 : 60
+        },
+        informar_accion: {
+          indicar_gestion_espera: !isDetractor,
+          retomar_en_menos_de_un_minuto: !isDetractor,
+          claridad_condiciones_comerciales: !isDetractor,
+          resumen_atencion_gestion: !isDetractor,
+          porcentaje: !isDetractor ? 100 : 25
+        },
+        cierre: {
+          preguntas_aseguramiento: !isDetractor,
+          esperar_confirmacion_cliente: !isDetractor,
+          guion_encuesta_escala_0_a_10: !isDetractor,
+          porcentaje: !isDetractor ? 100 : 33
+        }
+      },
+      porcentaje_total: !isDetractor ? 95 : 52,
+      observaciones_auditoria: !isDetractor 
+        ? 'Excelente aplicación de la pauta de atención institucional Claro Chile en sus 4 fases operativas.'
+        : 'Quiebres detectados en fases de Informar Acción (esperas sin justificación) y Cierre (omisión del guion normativo de encuesta 0 a 10).',
       saludo_institucional: true,
       verificacion_identidad: true,
       escucha_activa: !isDetractor,
@@ -825,13 +1224,35 @@ function generateRealisticMockAnalysis(fileName: string, agentName: string, queu
       politica_privacidad: true
     },
     nps_pronostico: {
-      score: isDetractor ? 2 : 9,
+      score: isDetractor ? 6 : 9, // Calibración amigable: no castigar con 2 si hubo esfuerzo humano
+      score_agente: isDetractor ? 7 : 10, // Percepción del trato humano del asesor OJT
       clasificacion: isDetractor ? 'DETRACTOR' : 'PROMOTOR',
       pregunta: '¿Qué tan probable es que recomiendes Claro a un amigo o familiar? Considerando una escala de 0 a 10, donde 0 es "Nada probable" y 10 es "Muy probable"',
       escala: 'Escala oficial de 0 a 10 (Donde 0 es "Nada probable" y 10 es "Muy probable")',
       justificacion: isDetractor 
-        ? 'El cliente expresó molestia severa ("estoy chato", "es una burla") por alza no informada en su boleta y anunció escalamiento formal al SERNAC y portabilidad a la competencia tras trato cortante del asesor.'
-        : 'Atención empática y resolutiva con entrega al tiro de regularización comercial y número de ticket normativo SUBTEL.'
+        ? 'El cliente presentó frustración por alza en su boleta de Claro. Aunque el asesor en OJT mantuvo el respeto, la demora en CRM y falta de explicación del proporcional afectaron la nota final.'
+        : 'Atención empática, fluida y resolutiva con entrega al tiro de regularización comercial y número de ticket normativo SUBTEL.',
+      factor_marca_vs_agente: isDetractor
+        ? 'Fricción originada en políticas de facturación de Claro (alza no notificada). El asesor novel mostró paciencia pero titubeó en la respuesta.'
+        : 'Total alineación positiva: cliente satisfecho con la respuesta y con el trato cercano del asesor.',
+      camino_a_promotor: isDetractor
+        ? 'Explicar el cálculo de cobro proporcional de inmediato sin pausas largas para elevar la percepción de dominio y cerrar en Promotor (9-10).'
+        : 'Mantener la calidez actual y asegurar siempre la mención de la encuesta de 0 a 10.'
+    },
+    diagnostico_ojt: {
+      nivel_madurez: isDetractor ? 'EN_DESARROLLO' : 'LISTO_PRODUCCION',
+      indice_autonomia: isDetractor ? 68 : 94,
+      brecha_principal: isDetractor ? 'HERRAMIENTA_SISTEMAS' : 'NINGUNA_DOMINIO',
+      requiere_intervencion_tutor: isDetractor,
+      roleplay_sugerido: isDetractor
+        ? 'Roleplay de 5 minutos: Simulación de cliente chileno con reclamo de boleta, practicando consulta rápida en Somos Clave y explicación de costo proporcional sin silencios prolongados.'
+        : 'Felicitación y refuerzo positivo en feedback de piso. Asesor listo para operar con autonomía completa.',
+      feedback_pedagogico: isDetractor
+        ? 'Muy buena compostura ante un cliente real en vivo. El asesor no perdió la calma; solo necesita más soltura en la navegación del CRM para evitar pausas que generen ansiedad en el usuario.'
+        : 'Desempeño sobresaliente en piso real. Excelente dicción, empatía con modismos chilenos y cumplimiento riguroso de la pauta Claro.',
+      observacion_piso_real: isDetractor
+        ? 'En piso real se observa concentración pero lentitud al buscar la cuenta en el sistema. Con 2 prácticas asistidas superará la brecha.'
+        : 'Interacción ágil con cliente real, logrando resolver el motivo de contacto en el primer contacto.'
     },
     silencio_analisis: {
       duracion_total_segundos: durSec,
@@ -932,44 +1353,34 @@ function generateRealisticMockAnalysis(fileName: string, agentName: string, queu
 
 // Start server with Vite middleware in dev or static serving in prod
 async function startServer() {
-  let currentPort = Number(process.env.PORT) || 3000;
-
-  if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
-    const { createServer: createViteServer } = await import('vite');
+  if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
+    const distPath = fs.existsSync(path.join(process.cwd(), 'dist'))
+      ? path.join(process.cwd(), 'dist')
+      : __dirname;
+    const indexPath = path.join(distPath, 'index.html');
+
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+      if (req.path.startsWith('/api/')) {
+        return res.status(404).json({ error: 'Endpoint API no encontrado' });
+      }
+      res.sendFile(indexPath);
     });
   }
 
-  const server = app.listen(currentPort, '0.0.0.0', () => {
-    console.log(`\n======================================================`);
-    console.log(`🚀 Claro Speech Analytics listo en: http://localhost:${currentPort}`);
-    console.log(`======================================================\n`);
-  });
-
-  server.on('error', (err: any) => {
-    if (err.code === 'EADDRINUSE') {
-      currentPort++;
-      console.log(`⚠️ Puerto ocupado, reintentando automáticamente en http://localhost:${currentPort}...`);
-      server.listen(currentPort, '0.0.0.0');
-    } else {
-      console.error('Server error:', err);
-    }
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Claro Speech Analytics server running on port ${PORT}`);
   });
 }
 
-// Only start standalone listener when not in Vercel serverless environment
-if (!process.env.VERCEL) {
+if (process.env.VERCEL !== '1') {
   startServer();
 }
 
-export { app };
 export default app;

@@ -5,10 +5,9 @@ export function exportCallsToExcel(calls: CallRecord[], fileName: string = 'Repo
   // Main calls sheet data
   const mainData = calls.map(c => ({
     'Código de Grabación': c.codigo_llamada,
-    'Nombre de Archivo': c.file_name || c.audioFile?.name || 'grabacion.wav',
     'Fecha y Hora': c.fecha_hora,
-    'ID Asesor': c.agente_id || '',
     'Asesor': c.agente_nombre,
+    'ID Asesor': c.agente_id,
     'Cliente': c.cliente_nombre,
     'Teléfono': c.cliente_telefono,
     'Cola de Atención': c.cola_atencion,
@@ -36,12 +35,17 @@ export function exportCallsToExcel(calls: CallRecord[], fileName: string = 'Repo
     'Claridad de Información (0-100)': c.evaluacion_criterios?.claridad_informacion?.nota ?? 0,
     'Tiempos de Espera Hold (0-100)': c.evaluacion_criterios?.tiempos_espera_hold?.nota ?? 0,
     'Eficiencia y TMO (0-100)': c.evaluacion_criterios?.eficiencia_tmo?.nota ?? 0,
-    // Script compliance
+    // Script compliance (Pauta Oficial Claro Chile 4 Fases)
+    'Adherencia Guion Total (%)': c.cumplimiento_guion?.porcentaje_total ?? 0,
+    'Fase 1 Bienvenida (%)': c.cumplimiento_guion?.fases?.bienvenida?.porcentaje ?? (c.cumplimiento_guion?.saludo_institucional ? 100 : 50),
+    'Fase 2 Entender y Resolver (%)': c.cumplimiento_guion?.fases?.entender_resolver?.porcentaje ?? (c.cumplimiento_guion?.verificacion_identidad ? 100 : 50),
+    'Fase 3 Informar Acción (%)': c.cumplimiento_guion?.fases?.informar_accion?.porcentaje ?? 80,
+    'Fase 4 Cierre (%)': c.cumplimiento_guion?.fases?.cierre?.porcentaje ?? (c.cumplimiento_guion?.despedida_cordial ? 100 : 50),
     'Saludo Institucional': c.cumplimiento_guion?.saludo_institucional ? 'CUMPLE' : 'NO CUMPLE',
     'Verificación de Identidad': c.cumplimiento_guion?.verificacion_identidad ? 'CUMPLE' : 'NO CUMPLE',
-    'Ofrecimiento de Ayuda': c.cumplimiento_guion?.ofrecimiento_ayuda ? 'CUMPLE' : 'NO CUMPLE',
+    'Ticket Normativo SUBTEL': c.cumplimiento_guion?.entrega_ticket_subtel ? 'CUMPLE' : 'NO CUMPLE',
     'Despedida Cordial': c.cumplimiento_guion?.despedida_cordial ? 'CUMPLE' : 'NO CUMPLE',
-    'Política de Privacidad': c.cumplimiento_guion?.politica_privacidad ? 'CUMPLE' : 'NO CUMPLE',
+    'Auditoría Guion Observación': c.cumplimiento_guion?.observaciones_auditoria ?? '',
     'Total Quiebres Detectados': c.quiebres_atencion?.length ?? 0,
     'Alertas de Riesgo': c.alertas?.join('; ') ?? '',
     'Palabras Clave': c.keywords?.join(', ') ?? '',
@@ -55,8 +59,6 @@ export function exportCallsToExcel(calls: CallRecord[], fileName: string = 'Repo
     (call.quiebres_atencion || []).forEach(q => {
       quiebresData.push({
         'Código Grabación': call.codigo_llamada,
-        'Nombre de Archivo': call.file_name || call.audioFile?.name || '',
-        'ID Asesor': call.agente_id || '',
         'Asesor': call.agente_nombre,
         'Cola': call.cola_atencion,
         'Marca de Tiempo': q.tiempo,
@@ -86,10 +88,9 @@ export function exportCallsToExcel(calls: CallRecord[], fileName: string = 'Repo
 export function exportCallsToCSV(calls: CallRecord[], fileName: string = 'Auditoria_Llamadas_Claro.csv') {
   const headers = [
     'Codigo_Llamada',
-    'Nombre_Archivo',
     'Fecha_Hora',
-    'ID_Asesor',
     'Asesor',
+    'ID_Asesor',
     'Cola_Atencion',
     'Driver',
     'TMO',
@@ -108,10 +109,9 @@ export function exportCallsToCSV(calls: CallRecord[], fileName: string = 'Audito
 
   const rows = calls.map(c => [
     `"${c.codigo_llamada}"`,
-    `"${(c.file_name || c.audioFile?.name || 'grabacion.wav').replace(/"/g, '""')}"`,
     `"${c.fecha_hora}"`,
-    `"${c.agente_id || ''}"`,
     `"${c.agente_nombre}"`,
+    `"${c.agente_id}"`,
     `"${c.cola_atencion}"`,
     `"${c.motivo_nombre.replace(/"/g, '""')}"`,
     `"${c.duracion_total}"`,

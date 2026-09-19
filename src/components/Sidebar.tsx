@@ -10,10 +10,11 @@ import {
   ChevronLeft,
   ChevronRight,
   TrendingUp,
-  Sparkles
+  Cpu,
+  SlidersHorizontal
 } from 'lucide-react';
 
-export type TabType = 'dashboard' | 'explorer' | 'audit' | 'queue';
+export type TabType = 'dashboard' | 'explorer' | 'audit' | 'queue' | 'calibration';
 
 interface SidebarProps {
   activeTab: TabType;
@@ -71,6 +72,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: Clock,
       badge: deferredCount > 0 ? deferredCount : null,
       badgeColor: 'bg-[#FBBC05] text-[#202124]',
+    },
+    {
+      id: 'calibration' as TabType,
+      label: 'Calibración & Prompt IA',
+      sublabel: 'Ajuste de pauta y chatbot',
+      icon: SlidersHorizontal,
+      badge: null,
     },
   ];
 
@@ -199,7 +207,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {isOpen && (
         <div className="m-3 rounded-2xl border border-[#DADCE0] bg-[#F8F9FA] p-3.5">
           <div className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-[#1A73E8]" />
+            <Cpu className="h-4 w-4 text-[#1A73E8]" strokeWidth={2} />
             <span className="text-xs font-semibold text-[#202124]">Motor de Auditoría</span>
           </div>
           <p className="mt-1 text-[11px] leading-relaxed text-[#5F6368]">

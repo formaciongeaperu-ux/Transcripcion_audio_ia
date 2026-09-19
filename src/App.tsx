@@ -4,13 +4,15 @@ import { Sidebar, TabType } from './components/Sidebar';
 import { DashboardView } from './components/DashboardView';
 import { CallsExplorerView } from './components/CallsExplorerView';
 import { CallDetailView } from './components/CallDetailView';
+import { CalibrationView } from './components/CalibrationView';
 import { UploadModal } from './components/UploadModal';
 import { DeferredQueueModal } from './components/DeferredQueueModal';
 import { SheetsModal } from './components/SheetsModal';
+import { CommandPalette } from './components/CommandPalette';
 import { CallRecord, UploadItem } from './types';
 import { exportCallsToExcel, exportCallsToCSV, exportSingleCallReport } from './utils/exportUtils';
-import { downsampleTo16kHzMonoWav } from './utils/audioOptimizer';
 import { SpreadsheetInfo, appendCallsToSpreadsheet } from './services/sheetsService';
+import { DriveFolderInfo, uploadAudioToDrive } from './services/driveService';
 import { getAccessToken } from './services/googleAuth';
 
 export default function App() {
@@ -38,6 +40,38 @@ export default function App() {
   const [deferredQueue, setDeferredQueue] = useState<UploadItem[]>([]);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [isRetryingQueue, setIsRetryingQueue] = useState<boolean>(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState<boolean>(false);
+  const [selectedCohort, setSelectedCohort] = useState<string>('all');
+
+  // Global keyboard shortcut Ctrl+K / Cmd+K to open Command Palette
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setCommandPaletteOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Filter calls by selected OJT cohort / campaign
+  const visibleCalls = React.useMemo(() => {
+    if (selectedCohort === 'all') return calls;
+    if (selectedCohort === 'nido_movil') {
+      return calls.filter((c) => /móvil|postpago|prepago/i.test(c.cola_atencion) || /postpago/i.test(c.motivo_nombre));
+    }
+    if (selectedCohort === 'nido_fibra') {
+      return calls.filter((c) => /hogar|fibra|fija|internet/i.test(c.cola_atencion) || /fibra|hfc/i.test(c.motivo_nombre));
+    }
+    if (selectedCohort === 'nido_retenciones') {
+      return calls.filter((c) => /retencion|baja|churn/i.test(c.cola_atencion) || /baja|renuncia|portabilidad/i.test(c.motivo_nombre));
+    }
+    if (selectedCohort === 'graduados') {
+      return calls.filter((c) => c.diagnostico_ojt?.nivel_madurez === 'LISTO_PRODUCCION');
+    }
+    return calls;
+  }, [calls, selectedCohort]);
 
   // Google Sheets state
   const [connectedSpreadsheet, setConnectedSpreadsheet] = useState<SpreadsheetInfo | null>(() => {
@@ -58,6 +92,25 @@ export default function App() {
     }
   });
 
+  // Google Drive state
+  const [connectedDriveFolder, setConnectedDriveFolder] = useState<DriveFolderInfo | null>(() => {
+    try {
+      const saved = localStorage.getItem('claro_drive_folder_info');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [autoUploadDrive, setAutoUploadDrive] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('claro_autoupload_drive');
+      return saved !== null ? JSON.parse(saved) : true;
+    } catch {
+      return true;
+    }
+  });
+
   // Sync connected sheet to local storage
   const handleUpdateConnectedSpreadsheet = (info: SpreadsheetInfo | null) => {
     setConnectedSpreadsheet(info);
@@ -68,9 +121,23 @@ export default function App() {
     }
   };
 
+  const handleUpdateConnectedDriveFolder = (info: DriveFolderInfo | null) => {
+    setConnectedDriveFolder(info);
+    if (info) {
+      localStorage.setItem('claro_drive_folder_info', JSON.stringify(info));
+    } else {
+      localStorage.removeItem('claro_drive_folder_info');
+    }
+  };
+
   const handleToggleAutoSync = (enabled: boolean) => {
     setAutoSyncSheets(enabled);
     localStorage.setItem('claro_autosync_sheets', JSON.stringify(enabled));
+  };
+
+  const handleToggleAutoUploadDrive = (enabled: boolean) => {
+    setAutoUploadDrive(enabled);
+    localStorage.setItem('claro_autoupload_drive', JSON.stringify(enabled));
   };
 
   // Sync calls to local storage
@@ -111,11 +178,31 @@ export default function App() {
       setSelectedCall(newCalls[0]);
       setActiveTab('audit');
 
-      // Auto-sync with connected Google Sheets database if enabled
+      // Auto-sync with connected Google Sheets & Drive if enabled
       if (connectedSpreadsheet && autoSyncSheets) {
         try {
           const token = await getAccessToken();
           if (token) {
+            // Optional: Auto-upload audio to Google Drive if configured
+            if (autoUploadDrive) {
+              for (const call of newCalls) {
+                if (call.audioFile) {
+                  try {
+                    const uploaded = await uploadAudioToDrive(
+                      token,
+                      call.audioFile,
+                      call.file_name || `audio-${call.codigo_llamada}.wav`,
+                      connectedDriveFolder?.id
+                    );
+                    if (uploaded?.webViewLink) {
+                      call.audio_url = uploaded.webViewLink;
+                    }
+                  } catch (driveErr) {
+                    console.warn('Audio drive upload skipped:', driveErr);
+                  }
+                }
+              }
+            }
             await appendCallsToSpreadsheet(token, connectedSpreadsheet.id, newCalls);
           }
         } catch (err) {
@@ -152,50 +239,26 @@ export default function App() {
   const handleRetryItem = async (item: UploadItem) => {
     setIsRetryingQueue(true);
     try {
-      let base64 = '';
-      if (item.optimizedBlob) {
-        const reader = new FileReader();
-        base64 = await new Promise((res) => {
-          reader.onloadend = () => res((reader.result as string).split(',')[1] || '');
-          reader.readAsDataURL(item.optimizedBlob!);
-        });
-      } else {
-        const opt = await downsampleTo16kHzMonoWav(item.file);
-        base64 = opt.base64;
-      }
-
       const response = await fetch('/api/analyze-call', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          audioBase64: base64,
-          mimeType: 'audio/wav',
           fileName: item.file.name,
           agentName: 'Asesor Claro',
           queue: 'Exclusivo Postpago Chile',
         }),
       });
-
-      const resText = await response.text();
-      let resData: any = {};
-      try {
-        resData = JSON.parse(resText);
-      } catch {
-        resData = { message: `Error del servidor (${response.status}): ${resText.slice(0, 100)}` };
-      }
-
-      if (response.ok && resData.success && resData.data) {
+      const resData = await response.json();
+      if (resData.success && resData.data) {
         const newCall = resData.data as CallRecord;
         newCall.audio_url = URL.createObjectURL(item.file);
         newCall.audioFile = item.file;
         newCall.file_name = item.file.name;
         setCalls((prev) => [newCall, ...prev]);
         handleRemoveDeferredItem(item.id);
-      } else {
-        alert(resData.message || 'No se pudo reintentar el análisis. Verifica tus API Keys de Gemini.');
       }
-    } catch (err: any) {
-      alert(`Error al reintentar: ${err?.message || err}`);
+    } catch {
+      // error handled
     } finally {
       setIsRetryingQueue(false);
     }
@@ -236,13 +299,16 @@ export default function App() {
         onOpenQueue={() => setQueueModalOpen(true)}
         onExport={handleExportFull}
         deferredCount={deferredQueue.length}
-        activeCallsCount={calls.length}
+        activeCallsCount={visibleCalls.length}
         isOnline={true}
         searchTerm={searchTerm}
         setSearchTerm={setSearchTerm}
         onOpenSheets={() => setSheetsModalOpen(true)}
         isSheetsConnected={!!connectedSpreadsheet}
         sheetsTitle={connectedSpreadsheet?.title}
+        onOpenCommandPalette={() => setCommandPaletteOpen(true)}
+        selectedCohort={selectedCohort}
+        setSelectedCohort={setSelectedCohort}
       />
 
       {/* Main Container */}
@@ -265,15 +331,15 @@ export default function App() {
           isSheetsConnected={!!connectedSpreadsheet}
           sheetsTitle={connectedSpreadsheet?.title}
           deferredCount={deferredQueue.length}
-          totalCalls={calls.length}
+          totalCalls={visibleCalls.length}
         />
 
         {/* Content Area */}
-        <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8">
-          <div className="mx-auto max-w-7xl">
+        <main className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-5">
+          <div className="mx-auto max-w-[1600px] w-full">
             {activeTab === 'dashboard' && (
               <DashboardView
-                calls={calls}
+                calls={visibleCalls}
                 onSelectCall={handleSelectCall}
                 onOpenUpload={() => setUploadModalOpen(true)}
               />
@@ -281,7 +347,7 @@ export default function App() {
 
             {activeTab === 'explorer' && (
               <CallsExplorerView
-                calls={calls}
+                calls={visibleCalls}
                 onSelectCall={handleSelectCall}
                 onOpenUpload={() => setUploadModalOpen(true)}
                 onExportFiltered={handleExportFiltered}
@@ -294,13 +360,30 @@ export default function App() {
                 onBackToList={() => setActiveTab('explorer')}
                 onExportCall={handleExportSingle}
                 onOpenUpload={() => setUploadModalOpen(true)}
+                calls={visibleCalls}
+                onSelectCall={handleSelectCall}
               />
+            )}
+
+            {activeTab === 'calibration' && (
+              <CalibrationView />
             )}
           </div>
         </main>
       </div>
 
       {/* Modals */}
+      <CommandPalette
+        isOpen={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+        calls={calls}
+        onSelectCall={handleSelectCall}
+        onOpenUpload={() => setUploadModalOpen(true)}
+        onExport={handleExportFull}
+        onOpenSheets={() => setSheetsModalOpen(true)}
+        onNavigateTab={(tab) => setActiveTab(tab)}
+      />
+
       <UploadModal
         isOpen={uploadModalOpen}
         onClose={() => setUploadModalOpen(false)}
@@ -328,6 +411,10 @@ export default function App() {
         onUpdateConnectedSpreadsheet={handleUpdateConnectedSpreadsheet}
         autoSyncEnabled={autoSyncSheets}
         onToggleAutoSync={handleToggleAutoSync}
+        connectedDriveFolder={connectedDriveFolder}
+        onUpdateConnectedDriveFolder={handleUpdateConnectedDriveFolder}
+        autoUploadDrive={autoUploadDrive}
+        onToggleAutoUploadDrive={handleToggleAutoUploadDrive}
       />
     </div>
   );

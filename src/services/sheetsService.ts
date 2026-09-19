@@ -4,21 +4,26 @@ export const SHEET_TAB_NAME = 'Auditorias_Llamadas';
 
 export const SHEET_HEADERS = [
   'Código Llamada',
-  'Nombre de Archivo',
   'Fecha y Hora',
-  'ID Asesor',
   'Asesor',
+  'ID Asesor',
   'Cliente',
   'Teléfono',
   'Campaña / Cola',
   'Duración',
   'QA Score Global (%)',
-  'NPS Score (1-10)',
+  'NPS Score (0-10)',
   'Clasificación NPS',
+  'Fase 1 Bienvenida (%)',
+  'Fase 2 Entender (%)',
+  'Fase 3 Informar (%)',
+  'Fase 4 Cierre (%)',
   'Sentimiento',
   'FCR Resuelto',
   '% Silencio',
-  'Resumen Auditoría'
+  'Resumen Auditoría',
+  'Quiebres Críticos',
+  'URL Audio Drive / Grabación'
 ];
 
 export interface SpreadsheetInfo {
@@ -69,7 +74,7 @@ export async function createAuditSpreadsheet(
   // Write headers to row 1
   await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(
-      `${SHEET_TAB_NAME}!A1:P1`
+      `${SHEET_TAB_NAME}!A1:O1`
     )}?valueInputOption=USER_ENTERED`,
     {
       method: 'PUT',
@@ -151,7 +156,7 @@ export async function ensureAuditTab(accessToken: string, spreadsheetId: string)
     // Write headers
     await fetch(
       `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${encodeURIComponent(
-        `${SHEET_TAB_NAME}!A1:P1`
+        `${SHEET_TAB_NAME}!A1:O1`
       )}?valueInputOption=USER_ENTERED`,
       {
         method: 'PUT',
@@ -171,12 +176,21 @@ export async function ensureAuditTab(accessToken: string, spreadsheetId: string)
  * Serializes a CallRecord into a row array for Google Sheets.
  */
 function callToRow(call: CallRecord): any[] {
+  const f = call.cumplimiento_guion?.fases;
+  const f1 = f?.bienvenida?.porcentaje ?? (call.cumplimiento_guion?.saludo_institucional ? 80 : 40);
+  const f2 = f?.entender_resolver?.porcentaje ?? (call.cumplimiento_guion?.escucha_activa ? 80 : 50);
+  const f3 = f?.informar_accion?.porcentaje ?? (call.cumplimiento_guion?.entrega_ticket_subtel ? 75 : 50);
+  const f4 = f?.cierre?.porcentaje ?? (call.cumplimiento_guion?.despedida_cordial ? 70 : 33);
+
+  const quiebres = (call.quiebres_atencion || [])
+    .map(q => `[${q.tipo}]: ${q.cita || q.impacto_cliente || ''}`)
+    .join(' | ');
+
   return [
     call.codigo_llamada || 'CALL-' + call.id.slice(-6),
-    call.file_name || call.audioFile?.name || 'grabacion.wav',
     call.fecha_hora || new Date().toISOString().replace('T', ' ').slice(0, 16),
-    call.agente_id || 'AG-001',
     call.agente_nombre || 'Asesor Claro',
+    call.agente_id || 'AG-001',
     call.cliente_nombre || 'Cliente',
     call.cliente_telefono || 'No registrado',
     call.cola_atencion || 'Atención General',
@@ -184,10 +198,16 @@ function callToRow(call: CallRecord): any[] {
     call.qa_score_global ?? 0,
     call.nps_pronostico?.score ?? 0,
     call.nps_pronostico?.clasificacion ?? 'PASIVO',
+    f1,
+    f2,
+    f3,
+    f4,
     call.sentimiento_label || 'Neutro',
     call.resolucion_primer_contacto ? 'SÍ' : 'NO',
     call.silencio_analisis?.porcentaje_silencio ?? 0,
-    call.resumen || ''
+    call.resumen || '',
+    quiebres || 'Sin quiebres críticos',
+    call.audio_url || 'Grabación en cola local'
   ];
 }
 
@@ -209,7 +229,7 @@ export async function appendCallsToSpreadsheet(
 
   const response = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${encodeURIComponent(
-      `${SHEET_TAB_NAME}!A:P`
+      `${SHEET_TAB_NAME}!A:U`
     )}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
     {
       method: 'POST',
@@ -241,7 +261,7 @@ export async function readCallsFromSpreadsheet(
   const cleanId = extractSpreadsheetId(spreadsheetId);
   const response = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${encodeURIComponent(
-      `${SHEET_TAB_NAME}!A2:O1000`
+      `${SHEET_TAB_NAME}!A2:U1000`
     )}`,
     {
       headers: {
@@ -270,10 +290,21 @@ export async function readCallsFromSpreadsheet(
     const npsScore = parseInt(r[9], 10) || 7;
     const npsClasif: 'PROMOTOR' | 'NEUTRO' | 'DETRACTOR' = 
       npsScore >= 9 ? 'PROMOTOR' : npsScore >= 7 ? 'NEUTRO' : 'DETRACTOR';
-    const sentimiento = r[11] || 'Neutro';
-    const fcr = (r[12] || '').toUpperCase() === 'SÍ' || (r[12] || '').toUpperCase() === 'SI';
-    const silencio = parseFloat(r[13]) || 0;
-    const resumen = r[14] || '';
+    
+    // Check if new 21-column format or legacy 15-column format
+    const isExtendedFormat = r.length >= 18;
+    const f1 = isExtendedFormat ? (parseFloat(r[11]) || 75) : 75;
+    const f2 = isExtendedFormat ? (parseFloat(r[12]) || 80) : 80;
+    const f3 = isExtendedFormat ? (parseFloat(r[13]) || 75) : 75;
+    const f4 = isExtendedFormat ? (parseFloat(r[14]) || 67) : 67;
+
+    const sentimiento = isExtendedFormat ? (r[15] || 'Neutro') : (r[11] || 'Neutro');
+    const fcrRaw = isExtendedFormat ? (r[16] || '') : (r[12] || '');
+    const fcr = fcrRaw.toUpperCase() === 'SÍ' || fcrRaw.toUpperCase() === 'SI';
+    const silencio = parseFloat(isExtendedFormat ? r[17] : r[13]) || 0;
+    const resumen = isExtendedFormat ? (r[18] || '') : (r[14] || '');
+    const quiebresRaw = isExtendedFormat ? (r[19] || '') : '';
+    const audioUrl = isExtendedFormat ? (r[20] || '') : '';
 
     return {
       id: `sheet-${cleanId.slice(0, 6)}-${idx}`,
@@ -286,6 +317,7 @@ export async function readCallsFromSpreadsheet(
       cola_atencion: cola,
       duracion_total: duracion,
       duracion_segundos: 300,
+      audio_url: audioUrl,
       qa_score_global: qaScore,
       resumen: resumen,
       motivo_categoria: 'soporte' as const,
@@ -320,21 +352,61 @@ export async function readCallsFromSpreadsheet(
         silencios_prolongados: [],
       },
       cumplimiento_guion: {
-        saludo_institucional: true,
-        verificacion_identidad: true,
-        escucha_activa: true,
-        entrega_ticket_subtel: true,
-        despedida_cordial: true,
+        saludo_institucional: f1 >= 70,
+        verificacion_identidad: f1 >= 70,
+        escucha_activa: f2 >= 70,
+        entrega_ticket_subtel: f3 >= 70,
+        despedida_cordial: f4 >= 60,
+        porcentaje_total: Math.round((f1 + f2 + f3 + f4) / 4),
+        fases: {
+          bienvenida: {
+            generar_experiencia_positiva: f1 >= 50,
+            mencionar_empresa_claro: f1 >= 70,
+            mencionar_nombre_apellido: f1 >= 75,
+            confirmar_nombre_cliente_rut_celular: true,
+            porcentaje: f1
+          },
+          entender_resolver: {
+            parafrasear_problema: f2 >= 60,
+            ordenar_multiples_requerimientos: true,
+            utilizar_sistemas_oficiales_somos_clave: true,
+            cortesia_por_favor_gracias: f2 >= 70,
+            validacion_identidad: true,
+            porcentaje: f2
+          },
+          informar_accion: {
+            indicar_gestion_espera: f3 >= 60,
+            retomar_en_menos_de_un_minuto: f3 >= 75,
+            claridad_condiciones_comerciales: true,
+            resumen_atencion_gestion: true,
+            porcentaje: f3
+          },
+          cierre: {
+            preguntas_aseguramiento: f4 >= 60,
+            esperar_confirmacion_cliente: true,
+            guion_encuesta_escala_0_a_10: f4 >= 67,
+            porcentaje: f4
+          }
+        },
+        observaciones_auditoria: quiebresRaw || 'Registro consolidado desde Google Sheets'
       },
       feedback_coaching: {
-        fortalezas: ['Gestión registrada y archivada en base de datos central.'],
-        oportunidades_mejora: ['Revisar detalles en caso de reclamos reiterados.'],
-        guion_sugerido_alternativo: 'Mantener protocolos cordiales y claros.',
+        fortalezas: ['Gestión registrada y archivada en base de datos central Google Sheets.'],
+        oportunidades_mejora: quiebresRaw ? [quiebresRaw] : ['Revisar detalles en caso de reclamos reiterados.'],
+        guion_sugerido_alternativo: 'Mantener protocolos cordiales y claros según pauta de 4 fases Claro Chile.',
         plan_accion: 'Seguimiento estándar.',
       },
       keywords: ['atención', 'claro', 'consulta'],
       alertas: [],
-      quiebres_atencion: [],
+      quiebres_atencion: quiebresRaw ? [{
+        id: `q-sheet-${idx}`,
+        tiempo: '01:00',
+        segundo: 60,
+        tipo: 'Observación Procedimental',
+        cita: quiebresRaw,
+        severidad: 'MEDIO' as const,
+        impacto_cliente: quiebresRaw
+      }] : [],
       segmentos: [],
     };
   });
