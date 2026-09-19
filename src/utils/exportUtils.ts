@@ -4,10 +4,11 @@ import { CallRecord } from '../types';
 export function exportCallsToExcel(calls: CallRecord[], fileName: string = 'Reporte_Auditoria_Speech_Analytics_Claro.xlsx') {
   // Main calls sheet data
   const mainData = calls.map(c => ({
+    'Nombre de Archivo': c.file_name || `${c.codigo_llamada}.wav`,
+    'ID Asesor': c.agente_id,
+    'Asesor': c.agente_nombre,
     'Código de Grabación': c.codigo_llamada,
     'Fecha y Hora': c.fecha_hora,
-    'Asesor': c.agente_nombre,
-    'ID Asesor': c.agente_id,
     'Cliente': c.cliente_nombre,
     'Teléfono': c.cliente_telefono,
     'Cola de Atención': c.cola_atencion,
@@ -58,8 +59,10 @@ export function exportCallsToExcel(calls: CallRecord[], fileName: string = 'Repo
   calls.forEach(call => {
     (call.quiebres_atencion || []).forEach(q => {
       quiebresData.push({
-        'Código Grabación': call.codigo_llamada,
+        'Nombre de Archivo': call.file_name || `${call.codigo_llamada}.wav`,
+        'ID Asesor': call.agente_id,
         'Asesor': call.agente_nombre,
+        'Código Grabación': call.codigo_llamada,
         'Cola': call.cola_atencion,
         'Marca de Tiempo': q.tiempo,
         'Segundo': q.segundo,
@@ -87,10 +90,11 @@ export function exportCallsToExcel(calls: CallRecord[], fileName: string = 'Repo
 
 export function exportCallsToCSV(calls: CallRecord[], fileName: string = 'Auditoria_Llamadas_Claro.csv') {
   const headers = [
+    'Nombre_Archivo',
+    'ID_Asesor',
+    'Asesor',
     'Codigo_Llamada',
     'Fecha_Hora',
-    'Asesor',
-    'ID_Asesor',
     'Cola_Atencion',
     'Driver',
     'TMO',
@@ -108,10 +112,11 @@ export function exportCallsToCSV(calls: CallRecord[], fileName: string = 'Audito
   ];
 
   const rows = calls.map(c => [
+    `"${((c.file_name || `${c.codigo_llamada}.wav`)).replace(/"/g, '""')}"`,
+    `"${(c.agente_id || '').replace(/"/g, '""')}"`,
+    `"${(c.agente_nombre || '').replace(/"/g, '""')}"`,
     `"${c.codigo_llamada}"`,
     `"${c.fecha_hora}"`,
-    `"${c.agente_nombre}"`,
-    `"${c.agente_id}"`,
     `"${c.cola_atencion}"`,
     `"${c.motivo_nombre.replace(/"/g, '""')}"`,
     `"${c.duracion_total}"`,

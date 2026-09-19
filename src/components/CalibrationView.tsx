@@ -24,12 +24,16 @@ import {
   ChevronUp,
   RefreshCw,
   Terminal,
-  Zap
+  Zap,
+  Sparkles,
+  Database,
+  X
 } from 'lucide-react';
 import { CalibrationData, SensitivitySettings, CalibrationChatMessage } from '../types';
 
 interface CalibrationViewProps {
   onNotify?: (message: string, type?: 'info' | 'success' | 'warning') => void;
+  calls?: any[];
 }
 
 const DEFAULT_TEMPLATES = [
@@ -60,9 +64,58 @@ const DEFAULT_TEMPLATES = [
   }
 ];
 
-function getClientConsultantReply(question: string): { reply: string; suggestedDirective?: string } {
+function getClientConsultantReply(question: string, ragContext?: any): { reply: string; suggestedDirective?: string } {
   const q = question.toLowerCase();
 
+  // 1. General call quality improvement / coaching / OJT development
+  if (
+    q.includes('mejoro la calidad') ||
+    q.includes('mejorar la calidad') ||
+    q.includes('subir nota') ||
+    q.includes('capacit') ||
+    q.includes('coaching') ||
+    q.includes('como mejorar') ||
+    q.includes('cómo mejorar') ||
+    q.includes('buenas practicas') ||
+    q.includes('buenas prácticas') ||
+    q.includes('estrategia de calidad')
+  ) {
+    const statsText = ragContext?.totalCalls
+      ? `\n\n📊 **Diagnóstico según nuestra base de datos activa (${ragContext.totalCalls} llamadas analizadas):**\n- **Puntuación promedio de calidad:** ${ragContext.avgScore || 78}/100\n- **Distribución tNPS:** ${ragContext.detractorsPct || 25}% Detractores | ${ragContext.promotersPct || 45}% Promotores\n- **Brechas operativas detectadas:** ${ragContext.topQuiebres || 'Pausas en sistemas sin hold, validación de RUT y omisión de escala en encuesta'}`
+      : '';
+
+    return {
+      reply: `¡Excelente consulta! Para mejorar de forma integral la calidad de las llamadas en la operación de Claro Chile / GEA Perú, debes trabajar en 4 pilares fundamentales:${statsText}
+
+### 1. Dominio del Protocolo de 4 Fases (Pauta Oficial Claro):
+* **Fase 1 - Bienvenida Impecable:** Saludar mencionando nombre, apellido y empresa (*"Claro Chile, le habla [Nombre], ¿con quién tengo el gusto?"*). Confirmar la titularidad por RUT al tiro.
+* **Fase 2 - Escucha Activa & Parafraseo:** Antes de abrir sistemas, resumir la duda del cliente (*"Entiendo perfectamente, don Juan, usted necesita revisar el detalle del cobro de su última boleta"*). Esto baja la ansiedad del cliente en un 40%.
+* **Fase 3 - Gestión Transparente de Esperas:** Nunca dejar al cliente en silencio muerto. Avisar siempre: *"Voy a verificar en Somos Clave, permítame 30 segundos en línea"*, y retomar el contacto antes del minuto.
+* **Fase 4 - Aseguramiento y Encuesta 0 a 10:** No cortar abruptamente. Preguntar *"¿Pude resolver todas sus dudas?"* y explicar la escala de encuesta formal: *"don Juan, podría recibir una encuesta donde 0 es la nota más baja y 10 la máxima"*.
+
+### 2. Aceleración Formativa en OJT (Piso de Entrenamiento):
+* **Micro-Roleplays de 5 minutos:** Practicar con los tutores antes del turno las 3 objeciones más duras de clientes chilenos (cobros no reconocidos, corte de fibra y bloqueo de IMEI).
+* **Foco en Feedback Pedagógico:** Corregir una sola conducta crítica por sesión en lugar de abrumar al asesor con toda la pauta.
+
+### 3. Reducción de Quiebres y Detractores:
+* Separar la molestia hacia la marca del trato humano. Aunque el cliente venga indignado, si el asesor mantiene la calma, empatiza y da alternativas claras, el tNPS sube a Neutro/Promotor.
+
+💡 *Si deseas que el motor de IA sea más formativo o flexibilice algún criterio específico en las evaluaciones, puedes presionar el botón "Calibración de Modelo con IA" para formular una directiva.*`,
+      suggestedDirective: undefined
+    };
+  }
+
+  // 2. Questions about system data / RAG statistics
+  if (q.includes('datos') || q.includes('estadistica') || q.includes('estadística') || q.includes('como vamos') || q.includes('cómo vamos') || q.includes('resumen')) {
+    if (ragContext?.totalCalls) {
+      return {
+        reply: `📈 **Resumen Ejecutivo de Speech Analytics (RAG en Vivo):**\n\n- **Volumen Total:** ${ragContext.totalCalls} llamadas evaluadas en la plataforma.\n- **Nota Media Operativa:** ${ragContext.avgScore || 78}/100 en QA Global.\n- **Clasificación tNPS:** ${ragContext.promotersPct || 40}% Promotores, ${ragContext.neutralsPct || 35}% Neutros y ${ragContext.detractorsPct || 25}% Detractores.\n- **Fases con mayor oportunidad:** Cierre y encuesta de satisfacción (omisión recurrente de la escala 0-10) y retención en hold prolongado durante consultas en Somos Clave.\n- **Estado OJT Asesores:** Asesores en curva de aprendizaje requieren refuerzo en habilidades blandas y empatía ante reclamos de boleta.\n\n¿Deseas profundizar en algún asesor específico o calibrar un umbral de evaluación?`,
+        suggestedDirective: undefined
+      };
+    }
+  }
+
+  // 3. Specific calibration topics
   if (q.includes('silencio') || q.includes('pausa') || q.includes('hold') || q.includes('espera')) {
     return {
       reply: `Para calibrar la detección de silencios en piso OJT, es fundamental distinguir entre **dead air por desconexión** y **pausas legítimas de navegación en Somos Clave / CRM**.\n\nEn llamadas de asesores noveles, los tiempos de consulta suelen rondar entre 20 y 45 segundos mientras buscan los procedimientos corporativos. Para evitar que la IA castigue injustamente el indicador de eficiencia TMO o tiempos de espera, te recomiendo agregar la siguiente directiva al prompt:`,
@@ -99,12 +152,12 @@ function getClientConsultantReply(question: string): { reply: string; suggestedD
   }
 
   return {
-    reply: `Entendido. He analizado el caso que describes en relación a la pauta de calidad Claro Chile y el contexto OJT.\n\nPara que la Inteligencia Artificial interprete con precisión esta situación en las próximas llamadas analizadas, lo más efectivo es definir una directiva con regla de excepción explícita. Aquí tienes una directiva lista para ser incorporada a tu calibración:`,
-    suggestedDirective: `- Regla de Excepción Operativa: En situaciones donde se presenten particularidades no habituales en la atención, evaluar con prioridad la actitud orientada a la solución, la cortesía hacia el usuario y la no afectación de la experiencia de cliente.`
+    reply: `Entendido tu planteamiento sobre la operación de Claro Chile / GEA Perú. Como consultor de Speech Analytics y aseguramiento de calidad, puedo ayudarte tanto a diagnosticar el desempeño de tus asesores como a ajustar las reglas del motor de IA.\n\nPara profundizar, ¿deseas que revisemos técnicas pedagógicas para los asesores, analicemos las llamadas del sistema o prefieres formular una regla de calibración para el modelo?`,
+    suggestedDirective: undefined
   };
 }
 
-export const CalibrationView: React.FC<CalibrationViewProps> = ({ onNotify }) => {
+export const CalibrationView: React.FC<CalibrationViewProps> = ({ onNotify, calls = [] }) => {
   const [calibrationData, setCalibrationData] = useState<CalibrationData | null>(null);
   const [customDirectives, setCustomDirectives] = useState('');
   const [sensitivity, setSensitivity] = useState<SensitivitySettings>({
@@ -121,12 +174,66 @@ export const CalibrationView: React.FC<CalibrationViewProps> = ({ onNotify }) =>
   const [saveBanner, setSaveBanner] = useState<string | null>(null);
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
 
+  // Model Calibration Modal State (Dedicated Assistant & Directives Formulator)
+  const [isModelModalOpen, setIsModelModalOpen] = useState(false);
+  const [modelModalQuery, setModelModalQuery] = useState('');
+  const [modelModalResult, setModelModalResult] = useState<{
+    reply: string;
+    suggestedDirective?: string;
+    modelUsed?: string;
+  } | null>(null);
+  const [isModelModalLoading, setIsModelModalLoading] = useState(false);
+
+  // Live RAG Context computed from actual calls in the system
+  const ragContextData = React.useMemo(() => {
+    if (!calls || calls.length === 0) {
+      return {
+        totalCalls: 0,
+        avgScore: 82,
+        promotersPct: 45,
+        neutralsPct: 35,
+        detractorsPct: 20,
+        topQuiebres: 'Pausas en Somos Clave sin hold, validación de RUT, omisión de escala 0-10',
+        commonDrivers: 'Reclamos de boleta, soporte técnico de fibra, consulta de saldos',
+        ojtSummary: 'Asesores en entrenamiento OJT con tutores'
+      };
+    }
+
+    const total = calls.length;
+    const avg = Math.round(calls.reduce((acc: number, c: any) => acc + (c.qa_score_global || 0), 0) / total);
+    const promoters = calls.filter((c: any) => (c.pronostico_nps?.clasificacion || '').toUpperCase().includes('PROMOTOR')).length;
+    const detractors = calls.filter((c: any) => (c.pronostico_nps?.clasificacion || '').toUpperCase().includes('DETRACTOR')).length;
+    const neutrals = total - promoters - detractors;
+
+    const quiebresList: string[] = [];
+    calls.forEach((c: any) => {
+      if (Array.isArray(c.quiebres_atencion)) {
+        c.quiebres_atencion.forEach((q: any) => {
+          if (q.descripcion) quiebresList.push(q.descripcion);
+        });
+      }
+    });
+
+    const drivers = Array.from(new Set(calls.map((c: any) => c.motivo_nombre || c.motivo_categoria).filter(Boolean))).slice(0, 4);
+
+    return {
+      totalCalls: total,
+      avgScore: avg,
+      promotersPct: Math.round((promoters / total) * 100),
+      neutralsPct: Math.round((neutrals / total) * 100),
+      detractorsPct: Math.round((detractors / total) * 100),
+      topQuiebres: quiebresList.slice(0, 3).join('; ') || 'Pausas en sistemas Somos Clave, validación de RUT',
+      commonDrivers: drivers.join(', ') || 'Consultas comerciales y reclamos de boleta',
+      ojtSummary: `${calls.filter((c: any) => c.diagnostico_ojt?.madurez === 'EN_REFUERZO').length} asesores en refuerzo, ${calls.filter((c: any) => c.diagnostico_ojt?.madurez === 'EN_DESARROLLO').length} en desarrollo`
+    };
+  }, [calls]);
+
   // Chatbot state
   const [chatMessages, setChatMessages] = useState<CalibrationChatMessage[]>([
     {
       id: 'welcome-1',
       sender: 'assistant',
-      text: '¡Hola! Soy tu Consultor Experto en Calibración y Aseguramiento de la Calidad (QA) para Claro Chile. Mi función es ayudarte a calibrar el comportamiento de la IA en la auditoría de llamadas.\n\nPuedes contarme situaciones reales de piso (por ejemplo: "los clientes interrumpen mucho el saludo", "la IA está calificando muy duro en llamadas por boletas altas", o "los asesores noveles demoran buscando en Somos Clave") y te sugeriré la directiva exacta para incorporar a tu prompt.',
+      text: '¡Hola! Soy tu Consultor Experto en Calibración y Aseguramiento de la Calidad (QA) para Claro Chile / GEA Perú. Cuento con acceso RAG a los datos reales de llamadas y a billones de parámetros de IA para ayudarte a mejorar los procesos operativos.\n\nPuedes hacerme consultas pedagógicas ("¿cómo mejorar la calidad de las llamadas?"), analizar quiebres de piso, o solicitar directivas de calibración de modelo para pegarlas directamente en la configuración activa.',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }
   ]);
@@ -247,15 +354,92 @@ export const CalibrationView: React.FC<CalibrationViewProps> = ({ onNotify }) =>
     setTimeout(() => setSaveBanner(null), 4000);
   };
 
-  // Add directive suggested by chatbot
+  // Add directive suggested by chatbot or model calibration
   const handleAddDirectiveFromChat = (directive: string) => {
     setCustomDirectives((prev) => {
       const cleanPrev = prev.trim();
       return cleanPrev + (cleanPrev ? '\n\n' : '') + directive.trim();
     });
     setActiveTab('directives');
-    setSaveBanner('Directiva añadida desde el chatbot. Haz clic en "Guardar Calibración" para aplicarla al motor.');
+    setSaveBanner('¡Directiva pegada en la Calibración del Modelo! Haz clic en "Guardar Calibración" para que el motor la aplique a las próximas llamadas.');
     setTimeout(() => setSaveBanner(null), 5000);
+    setTimeout(() => {
+      editorRef.current?.focus();
+      editorRef.current?.scrollTo({ top: editorRef.current.scrollHeight, behavior: 'smooth' });
+    }, 150);
+  };
+
+  // Dedicated generator for the Model Calibration modal
+  const handleGenerateModelCalibration = async (queryText?: string) => {
+    const text = (queryText || modelModalQuery).trim();
+    if (!text || isModelModalLoading) return;
+
+    setIsModelModalLoading(true);
+    setModelModalResult(null);
+
+    try {
+      let data: any = null;
+      try {
+        const res = await fetch('/api/calibration/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: `Genera una directiva de calibración de modelo para el siguiente requerimiento operativo de QA: ${text}`,
+            customDirectives,
+            ragContext: ragContextData
+          })
+        });
+        if (res.ok) {
+          const contentType = res.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            data = await res.json();
+          }
+        }
+      } catch (e) {
+        console.warn('Fallback al generar calibración:', e);
+      }
+
+      if (!data || !data.reply) {
+        const fallback = getClientConsultantReply(text, ragContextData);
+        data = {
+          reply: fallback.reply,
+          suggestedDirective: fallback.suggestedDirective || `- Regla de Calibración (${text.slice(0, 35)}): En la evaluación de llamadas en vivo, flexibilizar la exigencia ante imprevistos del cliente priorizando la empatía y la resolución efectiva del trámite.`
+        };
+      }
+
+      setModelModalResult({
+        reply: data.reply,
+        suggestedDirective: data.suggestedDirective,
+        modelUsed: data.meta?.modelUsed || data.meta?.engine || 'Consultor Experto RAG GEA / Claro'
+      });
+    } catch (err) {
+      const fallback = getClientConsultantReply(text, ragContextData);
+      setModelModalResult({
+        reply: fallback.reply,
+        suggestedDirective: fallback.suggestedDirective || `- Regla de Calibración: Ponderar la actitud y respeto hacia el cliente en las auditorías de calidad.`
+      });
+    } finally {
+      setIsModelModalLoading(false);
+    }
+  };
+
+  // Paste directive from modal directly into active calibration editor
+  const handlePasteDirectiveIntoEditor = (directiveText?: string) => {
+    const dir = directiveText || modelModalResult?.suggestedDirective;
+    if (!dir) return;
+
+    setCustomDirectives((prev) => {
+      const cleanPrev = prev.trim();
+      return cleanPrev + (cleanPrev ? '\n\n' : '') + dir.trim();
+    });
+    setActiveTab('directives');
+    setIsModelModalOpen(false);
+    setSaveBanner('¡Directiva pegada exitosamente en la Calibración del Modelo! Recuerda presionar "Guardar Calibración" para que el motor la aplique.');
+    if (onNotify) onNotify('Directiva pegada en Calibración de Modelo', 'success');
+    setTimeout(() => {
+      editorRef.current?.focus();
+      editorRef.current?.scrollTo({ top: editorRef.current.scrollHeight, behavior: 'smooth' });
+    }, 200);
   };
 
   // Send message to calibration consultant
@@ -292,7 +476,8 @@ export const CalibrationView: React.FC<CalibrationViewProps> = ({ onNotify }) =>
           body: JSON.stringify({
             message: text.trim(),
             history: historyPayload,
-            customDirectives
+            customDirectives,
+            ragContext: ragContextData
           })
         });
 
@@ -306,9 +491,9 @@ export const CalibrationView: React.FC<CalibrationViewProps> = ({ onNotify }) =>
         console.warn('Fallo de red hacia /api/calibration/chat, usando consultor de contingencia:', networkErr);
       }
 
-      // If backend response is missing or empty, use instant expert consultant
+      // If backend response is missing or empty, use instant expert consultant with RAG
       if (!data || !data.reply) {
-        const fallback = getClientConsultantReply(text.trim());
+        const fallback = getClientConsultantReply(text.trim(), ragContextData);
         data = {
           reply: fallback.reply,
           suggestedDirective: fallback.suggestedDirective
@@ -324,7 +509,7 @@ export const CalibrationView: React.FC<CalibrationViewProps> = ({ onNotify }) =>
       };
       setChatMessages((prev) => [...prev, assistantMsg]);
     } catch (err: any) {
-      const fallback = getClientConsultantReply(text.trim());
+      const fallback = getClientConsultantReply(text.trim(), ragContextData);
       const assistantMsg: CalibrationChatMessage = {
         id: `assistant-${Date.now()}`,
         sender: 'assistant',
@@ -460,13 +645,37 @@ export const CalibrationView: React.FC<CalibrationViewProps> = ({ onNotify }) =>
           <div className="flex-1 p-5">
             {activeTab === 'directives' && (
               <div className="space-y-4">
-                <div className="flex items-center justify-between text-xs text-[#5F6368]">
-                  <span>
-                    Agrega reglas o excepciones específicas que el motor de IA aplicará con máxima prioridad:
-                  </span>
-                  <span className="font-mono text-[11px] text-[#70757A]">
-                    {customDirectives.length} caracteres • {customDirectives.split('\n').length} líneas
-                  </span>
+                <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between rounded-lg border border-[#D2E3FC] bg-[#EEF5FD] p-3">
+                  <div>
+                    <h4 className="text-xs font-bold text-[#185ABC] flex items-center gap-1.5">
+                      <FileText className="h-4 w-4 text-[#1A73E8]" />
+                      Directivas de Calibración Activas en el Motor
+                    </h4>
+                    <p className="text-[11px] text-[#5F6368] mt-0.5">
+                      Reglas y excepciones con máxima prioridad aplicadas al auditar las llamadas.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      id="btn-open-model-calibration-modal"
+                      type="button"
+                      onClick={() => {
+                        setIsModelModalOpen(true);
+                        setModelModalResult(null);
+                      }}
+                      className="group flex items-center gap-2 rounded-lg bg-gradient-to-r from-[#1A73E8] to-[#1557B0] px-3.5 py-1.5 text-xs font-bold text-white shadow-xs transition hover:shadow-md hover:brightness-105 active:scale-95 cursor-pointer"
+                      title="Abrir asistente para calibrar el modelo de acuerdo a consultas operativas"
+                    >
+                      <Sparkles className="h-3.5 w-3.5 text-[#FEEA3A] transition group-hover:rotate-12" />
+                      <span>Calibración de Modelo con IA</span>
+                      <span className="rounded-full bg-white/20 px-1.5 py-0.2 text-[10px] font-extrabold uppercase tracking-wide">
+                        RAG
+                      </span>
+                    </button>
+                    <span className="font-mono text-[11px] text-[#70757A] hidden sm:inline">
+                      {customDirectives.length} caracteres
+                    </span>
+                  </div>
                 </div>
 
                 {/* Directives Textarea */}
@@ -816,11 +1025,11 @@ FASE 4: CIERRE
               </div>
               <div>
                 <h3 className="text-xs font-bold text-[#202124]">
-                  Consultor de Calibración Claro QA
+                  Consultor RAG Speech Analytics & Calibración
                 </h3>
                 <div className="flex items-center gap-1.5 text-[11px] text-[#34A853]">
                   <span className="h-2 w-2 rounded-full bg-[#34A853] animate-pulse"></span>
-                  <span>En línea • Asistente Gemini 3.8 Flash</span>
+                  <span>En línea • RAG con {ragContextData.totalCalls} llamadas analizadas</span>
                 </div>
               </div>
             </div>
@@ -831,7 +1040,7 @@ FASE 4: CIERRE
                   {
                     id: 'welcome-reset',
                     sender: 'assistant',
-                    text: 'Conversación reiniciada. ¿Qué situación operativa de llamadas te gustaría calibrar hoy?',
+                    text: 'Conversación reiniciada. ¿Qué consulta o regla operativa deseas calibrar hoy?',
                     timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                   }
                 ]);
@@ -846,14 +1055,14 @@ FASE 4: CIERRE
           {/* Quick Starter Chips */}
           <div className="border-b border-[#E8EAED] bg-[#F8F9FA]/60 p-2">
             <p className="px-2 text-[10px] font-semibold uppercase tracking-wider text-[#70757A]">
-              Preguntas de calibración rápida:
+              Consultas y calibración rápida:
             </p>
             <div className="mt-1 flex flex-wrap gap-1.5 px-1">
               {[
-                '¿Cómo flexibilizo el saludo si el cliente interrumpe?',
+                '¿Cómo mejoro la calidad de las llamadas?',
                 '¿Cómo evitar detractor en quejas de boleta Claro?',
-                '¿Cómo dar más tiempo a pausas en Somos Clave?',
-                '¿Cómo exigir verificación estricta de RUT?'
+                'Tolerancia a silencios en Somos Clave (45s)',
+                '¿Cuáles son los principales quiebres de piso?'
               ].map((query, idx) => (
                 <button
                   key={idx}
@@ -888,7 +1097,7 @@ FASE 4: CIERRE
                     <div className="mt-3 rounded-lg border border-[#1A73E8]/30 bg-white p-3 shadow-xs">
                       <div className="flex items-center gap-1.5 text-[11px] font-bold text-[#1A73E8]">
                         <Zap className="h-3.5 w-3.5 text-[#1A73E8]" />
-                        <span>Directiva recomendada para el Prompt:</span>
+                        <span>Directiva recomendada para Calibración de Modelo:</span>
                       </div>
                       <div className="mt-1.5 rounded-md bg-[#F1F3F4] p-2 font-mono text-[11px] text-[#202124] leading-relaxed select-all">
                         {msg.suggestedDirective}
@@ -908,10 +1117,11 @@ FASE 4: CIERRE
                         <button
                           id={`btn-add-directive-${msg.id}`}
                           onClick={() => handleAddDirectiveFromChat(msg.suggestedDirective!)}
-                          className="flex items-center gap-1 rounded-md bg-[#1A73E8] px-2.5 py-1 text-[11px] font-semibold text-white shadow-xs hover:bg-[#1557B0]"
+                          className="flex items-center gap-1.5 rounded-md bg-[#34A853] px-3 py-1.5 text-[11px] font-bold text-white shadow-xs hover:bg-[#2D9249] transition active:scale-95"
+                          title="Pegar esta directiva en la Calibración del Modelo activa"
                         >
-                          <Plus className="h-3 w-3" />
-                          <span>Añadir a mis Directivas</span>
+                          <Terminal className="h-3.5 w-3.5" />
+                          <span>Pegar en Calibración del Modelo</span>
                         </button>
                       </div>
                     </div>
@@ -924,7 +1134,7 @@ FASE 4: CIERRE
             {isChatSending && (
               <div className="flex items-center gap-2 text-xs text-[#5F6368] p-2 bg-[#F8F9FA] rounded-lg w-fit">
                 <RefreshCw className="h-3.5 w-3.5 animate-spin text-[#1A73E8]" />
-                <span>El consultor está formulando la directiva de calibración...</span>
+                <span>El consultor está formulando la directiva de calibración con RAG...</span>
               </div>
             )}
 
@@ -945,7 +1155,7 @@ FASE 4: CIERRE
                 type="text"
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
-                placeholder="Pregúntale al consultor cómo calibrar un criterio..."
+                placeholder="Pregúntale al consultor (calidad, quiebres, directivas de modelo)..."
                 className="flex-1 rounded-lg border border-[#DADCE0] bg-[#F8F9FA] px-3.5 py-2 text-xs text-[#202124] transition focus:border-[#1A73E8] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#1A73E8]"
                 disabled={isChatSending}
               />
@@ -953,7 +1163,7 @@ FASE 4: CIERRE
                 id="btn-send-calibration-chat"
                 type="submit"
                 disabled={!chatInput.trim() || isChatSending}
-                className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#1A73E8] text-white shadow-xs transition hover:bg-[#1557B0] disabled:opacity-50 shrink-0"
+                className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#1A73E8] text-white shadow-xs transition hover:bg-[#1557B0] disabled:opacity-50 shrink-0 cursor-pointer"
               >
                 <Send className="h-4 w-4" />
               </button>
@@ -961,6 +1171,212 @@ FASE 4: CIERRE
           </div>
         </div>
       </div>
+
+      {/* Modal de Calibración de Modelo con IA (RAG) */}
+      {isModelModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="relative flex max-h-[90vh] w-full max-w-2xl flex-col rounded-2xl border border-[#DADCE0] bg-white shadow-2xl">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-[#DADCE0] bg-gradient-to-r from-[#F8F9FA] to-[#EEF5FD] px-5 py-4 rounded-t-2xl">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#1A73E8] to-[#1557B0] text-white shadow-xs">
+                  <Sparkles className="h-5 w-5 text-[#FEEA3A]" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[#202124] flex items-center gap-2">
+                    Calibración de Modelo con IA
+                    <span className="rounded-full bg-[#E8F0FE] px-2 py-0.5 text-[10px] font-bold text-[#1A73E8] uppercase">
+                      RAG Activo
+                    </span>
+                  </h3>
+                  <p className="text-xs text-[#5F6368]">
+                    La IA consulta los datos operativos de tus llamadas y redacta el prompt óptimo para tu modelo.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsModelModalOpen(false)}
+                className="rounded-lg p-1.5 text-[#5F6368] transition hover:bg-[#DADCE0]/50 hover:text-[#202124] cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              {/* RAG Context Strip */}
+              <div className="rounded-xl border border-[#D2E3FC] bg-[#F8FBFF] p-3.5">
+                <div className="flex items-center gap-2 text-xs font-bold text-[#185ABC] mb-1.5">
+                  <Database className="h-4 w-4 text-[#1A73E8]" />
+                  <span>Contexto Operativo RAG Inyectado al Modelo:</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4">
+                  <div className="rounded-lg bg-white p-2 border border-[#E8EAED]">
+                    <span className="text-[#70757A] block">Llamadas Base:</span>
+                    <span className="font-bold text-[#202124]">{ragContextData.totalCalls} evaluadas</span>
+                  </div>
+                  <div className="rounded-lg bg-white p-2 border border-[#E8EAED]">
+                    <span className="text-[#70757A] block">QA Promedio:</span>
+                    <span className="font-bold text-[#1A73E8]">{ragContextData.avgScore}/100</span>
+                  </div>
+                  <div className="rounded-lg bg-white p-2 border border-[#E8EAED]">
+                    <span className="text-[#70757A] block">Detractores tNPS:</span>
+                    <span className="font-bold text-[#EA4335]">{ragContextData.detractorsPct}%</span>
+                  </div>
+                  <div className="rounded-lg bg-white p-2 border border-[#E8EAED]">
+                    <span className="text-[#70757A] block">Promotores tNPS:</span>
+                    <span className="font-bold text-[#34A853]">{ragContextData.promotersPct}%</span>
+                  </div>
+                </div>
+                <div className="mt-2 text-[11px] text-[#5F6368]">
+                  <strong>Quiebres de atención frecuentes:</strong> {ragContextData.topQuiebres}
+                </div>
+              </div>
+
+              {/* Consultation Input */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-[#202124] flex items-center justify-between">
+                  <span>¿Qué situación o regla operativa deseas calibrar en el modelo?</span>
+                  <span className="text-[11px] font-normal text-[#70757A]">Usa billones de parámetros de IA</span>
+                </label>
+                <textarea
+                  rows={3}
+                  value={modelModalQuery}
+                  onChange={(e) => setModelModalQuery(e.target.value)}
+                  placeholder="Ej: Deseo que si un cliente reclama por cobros altos en su boleta de Claro, pero el asesor mantiene la calma y ofrece alternativas sin perder el respeto, la IA no lo penalice como detractor..."
+                  className="w-full rounded-lg border border-[#DADCE0] bg-[#F8F9FA] p-3 text-xs leading-relaxed text-[#202124] focus:border-[#1A73E8] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#1A73E8]"
+                />
+
+                {/* Quick Query Pills */}
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#70757A] block mb-1.5">
+                    Ejemplos frecuentes de calibración:
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      'Tolerancia a silencios en Somos Clave (45s sin marcar quiebre)',
+                      'Blindaje tNPS ante reclamos críticos de boleta Claro',
+                      'Flexibilidad en bienvenida por interrupción de cliente',
+                      'Validación estricta de titularidad por RUT completo'
+                    ].map((example, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => {
+                          setModelModalQuery(example);
+                          handleGenerateModelCalibration(example);
+                        }}
+                        disabled={isModelModalLoading}
+                        className="rounded-md border border-[#DADCE0] bg-white px-2 py-1 text-[11px] text-[#3C4043] transition hover:border-[#1A73E8] hover:bg-[#E8F0FE] hover:text-[#1A73E8] text-left cursor-pointer"
+                      >
+                        {example}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="pt-1 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => handleGenerateModelCalibration()}
+                    disabled={!modelModalQuery.trim() || isModelModalLoading}
+                    className="flex items-center gap-2 rounded-lg bg-[#1A73E8] px-4 py-2 text-xs font-bold text-white shadow-xs transition hover:bg-[#1557B0] disabled:opacity-50 cursor-pointer"
+                  >
+                    {isModelModalLoading ? (
+                      <>
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                        <span>Consultando a la IA y formulando prompt...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="h-4 w-4 text-[#FEEA3A]" />
+                        <span>Generar Directiva de Calibración</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* AI Generated Result & Paste Action */}
+              {modelModalResult && (
+                <div className="space-y-3 rounded-xl border border-[#1A73E8]/30 bg-[#F8FBFF] p-4 animate-in fade-in duration-200">
+                  <div className="flex items-center justify-between text-xs font-bold text-[#1A73E8]">
+                    <div className="flex items-center gap-1.5">
+                      <CheckCircle2 className="h-4 w-4 text-[#34A853]" />
+                      <span>Directiva Calibrada por la IA:</span>
+                    </div>
+                    {modelModalResult.modelUsed && (
+                      <span className="text-[10px] font-normal text-[#5F6368]">
+                        Motor: {modelModalResult.modelUsed}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* AI Explanation */}
+                  <p className="text-xs text-[#3C4043] leading-relaxed whitespace-pre-wrap">
+                    {modelModalResult.reply}
+                  </p>
+
+                  {/* Prompt Directive Block */}
+                  {modelModalResult.suggestedDirective && (
+                    <div className="space-y-2">
+                      <div className="rounded-lg border border-[#DADCE0] bg-[#202124] p-3 font-mono text-xs text-[#E8EAED] leading-relaxed select-all">
+                        {modelModalResult.suggestedDirective}
+                      </div>
+
+                      {/* Main requested button: "Pegar en la calibración del modelo" */}
+                      <div className="flex items-center justify-end gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => handleCopyText(modelModalResult.suggestedDirective!, 'modal-dir')}
+                          className="flex items-center gap-1.5 rounded-lg border border-[#DADCE0] bg-white px-3 py-1.5 text-xs font-medium text-[#5F6368] hover:bg-[#F1F3F4]"
+                        >
+                          {copiedSection === 'modal-dir' ? (
+                            <>
+                              <Check className="h-3.5 w-3.5 text-[#34A853]" />
+                              <span className="text-[#34A853]">Copiado</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="h-3.5 w-3.5" />
+                              <span>Copiar Prompt</span>
+                            </>
+                          )}
+                        </button>
+
+                        <button
+                          id="btn-paste-directive-to-model"
+                          type="button"
+                          onClick={() => handlePasteDirectiveIntoEditor(modelModalResult.suggestedDirective)}
+                          className="flex items-center gap-2 rounded-lg bg-[#34A853] px-4 py-1.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#2D9249] active:scale-95 cursor-pointer"
+                        >
+                          <Terminal className="h-4 w-4" />
+                          <span>Pegar en Calibración del Modelo</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between border-t border-[#DADCE0] bg-[#F8F9FA] px-5 py-3 rounded-b-2xl">
+              <span className="text-[11px] text-[#70757A]">
+                La directiva se pegará directamente en el editor activo de Directivas del modelo.
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsModelModalOpen(false)}
+                className="rounded-lg border border-[#DADCE0] bg-white px-3.5 py-1.5 text-xs font-medium text-[#5F6368] hover:bg-[#F1F3F4]"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

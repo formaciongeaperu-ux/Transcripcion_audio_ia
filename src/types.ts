@@ -181,6 +181,8 @@ export interface UploadItem {
   status: 'pending' | 'optimizing' | 'processing' | 'completed' | 'deferred' | 'error';
   errorMessage?: string;
   resultRecord?: CallRecord;
+  agentId?: string;
+  agentName?: string;
 }
 
 export interface QueueItem {

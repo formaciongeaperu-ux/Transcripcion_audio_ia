@@ -77,6 +77,7 @@ export const CallsExplorerView: React.FC<CallsExplorerViewProps> = ({
         const matchesSearch =
           searchTerm === '' ||
           c.codigo_llamada.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (c.file_name && c.file_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
           c.agente_nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
           c.agente_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
           c.cliente_nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -416,12 +417,19 @@ export const CallsExplorerView: React.FC<CallsExplorerViewProps> = ({
                           <div className="font-mono font-bold text-[#1A73E8]">
                             {call.codigo_llamada}
                           </div>
-                          <div className="text-[11px] text-[#5F6368]">{call.fecha_hora}</div>
+                          {call.file_name && (
+                            <div className="text-[11px] font-medium text-[#5F6368] truncate max-w-[170px]" title={`Audio original: ${call.file_name}`}>
+                              📁 {call.file_name}
+                            </div>
+                          )}
+                          <div className="text-[10px] text-[#80868B]">{call.fecha_hora}</div>
                         </td>
 
                         <td className="py-3.5 px-4">
                           <div className="font-bold text-[#202124]">{call.agente_nombre}</div>
-                          <div className="text-[11px] text-[#5F6368]">{call.agente_id}</div>
+                          <div className="inline-block mt-0.5 rounded bg-[#F1F3F4] px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[#3C4043]">
+                            ID: {call.agente_id}
+                          </div>
                         </td>
 
                         {/* OJT Diagnosis Status */}

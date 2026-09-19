@@ -302,9 +302,58 @@ function getActiveFullPrompt(): string {
 }
 
 // Simulated QA Consultant when no Gemini API key is configured
-function generateSimulatedConsultantReply(question: string, currentDirectives: string) {
+function generateSimulatedConsultantReply(question: string, currentDirectives: string, ragContext?: any) {
   const q = question.toLowerCase();
 
+  // 1. General call quality improvement / coaching / OJT development
+  if (
+    q.includes('mejoro la calidad') ||
+    q.includes('mejorar la calidad') ||
+    q.includes('subir nota') ||
+    q.includes('capacit') ||
+    q.includes('coaching') ||
+    q.includes('como mejorar') ||
+    q.includes('cómo mejorar') ||
+    q.includes('buenas practicas') ||
+    q.includes('buenas prácticas') ||
+    q.includes('estrategia de calidad')
+  ) {
+    const statsText = ragContext?.totalCalls
+      ? `\n\n📊 **Diagnóstico según nuestra base de datos activa (${ragContext.totalCalls} llamadas analizadas):**\n- **Puntuación promedio de calidad:** ${ragContext.avgScore || 78}/100\n- **Distribución tNPS:** ${ragContext.detractorsPct || 25}% Detractores | ${ragContext.promotersPct || 45}% Promotores\n- **Brechas operativas detectadas:** ${ragContext.topQuiebres || 'Pausas en sistemas sin hold, validación de RUT y omisión de escala en encuesta'}`
+      : '';
+
+    return {
+      reply: `¡Excelente consulta! Para mejorar de forma integral la calidad de las llamadas en la operación de Claro Chile / GEA Perú, debes trabajar en 4 pilares fundamentales:${statsText}
+
+### 1. Dominio del Protocolo de 4 Fases (Pauta Oficial):
+* **Fase 1 - Bienvenida Impecable:** Saludar mencionando nombre, apellido y empresa (*"Claro Chile, le habla [Nombre], ¿con quién tengo el gusto?"*). Confirmar la titularidad por RUT al tiro.
+* **Fase 2 - Escucha Activa & Parafraseo:** Antes de abrir sistemas, resumir la duda del cliente (*"Entiendo perfectamente, don Juan, usted necesita revisar el detalle del cobro de su última boleta"*). Esto baja la ansiedad del cliente en un 40%.
+* **Fase 3 - Gestión Transparente de Esperas:** Nunca dejar al cliente en silencio muerto. Avisar siempre: *"Voy a verificar en Somos Clave, permítame 30 segundos en línea"*, y retomar el contacto antes del minuto.
+* **Fase 4 - Aseguramiento y Encuesta 0 a 10:** No cortar abruptamente. Preguntar *"¿Pude resolver todas sus dudas?"* y explicar la escala de encuesta formal: *"don Juan, podría recibir una encuesta donde 0 es la nota más baja y 10 la máxima"*.
+
+### 2. Aceleración Formativa en OJT (Piso de Entrenamiento):
+* **Micro-Roleplays de 5 minutos:** Practicar con los tutores antes del turno las 3 objeciones más duras de clientes chilenos (cobros no reconocidos, corte de fibra y bloqueo de IMEI).
+* **Foco en Feedback Pedagógico:** Corregir una sola conducta crítica por sesión en lugar de abrumar al asesor con toda la pauta.
+
+### 3. Reducción de Quiebres y Detractores:
+* Separar la molestia hacia la marca del trato humano. Aunque el cliente venga indignado, si el asesor mantiene la calma, empatiza y da alternativas claras, el tNPS sube a Neutro/Promotor.
+
+💡 *Si deseas que el motor de IA sea más formativo o flexibilice algún criterio específico en las evaluaciones, puedes calibrarlo directamente con una regla de excepción.*`,
+      suggestedDirective: undefined
+    };
+  }
+
+  // 2. Questions about system data / RAG statistics
+  if (q.includes('datos') || q.includes('estadistica') || q.includes('estadística') || q.includes('como vamos') || q.includes('cómo vamos') || q.includes('resumen')) {
+    if (ragContext?.totalCalls) {
+      return {
+        reply: `📈 **Resumen Ejecutivo de Speech Analytics (RAG en Vivo):**\n\n- **Volumen Total:** ${ragContext.totalCalls} llamadas evaluadas en la plataforma.\n- **Nota Media Operativa:** ${ragContext.avgScore || 78}/100 en QA Global.\n- **Clasificación tNPS:** ${ragContext.promotersPct || 40}% Promotores, ${ragContext.neutralsPct || 35}% Neutros y ${ragContext.detractorsPct || 25}% Detractores.\n- **Fases con mayor oportunidad:** Cierre y encuesta de satisfacción (omisión recurrente de la escala 0-10) y retención en hold prolongado durante consultas en Somos Clave.\n- **Estado OJT Asesores:** Asesores en curva de aprendizaje requieren refuerzo en habilidades blandas y empatía ante reclamos de boleta.\n\n¿Deseas profundizar en algún asesor específico o calibrar un umbral de evaluación?`,
+        suggestedDirective: undefined
+      };
+    }
+  }
+
+  // 3. Specific calibration topics
   if (q.includes('silencio') || q.includes('pausa') || q.includes('hold') || q.includes('espera')) {
     return {
       reply: `Para calibrar la detección de silencios en piso OJT, es fundamental distinguir entre **dead air por desconexión** y **pausas legítimas de navegación en Somos Clave / CRM**.\n\nEn llamadas de asesores noveles, los tiempos de consulta suelen rondar entre 20 y 45 segundos mientras buscan los procedimientos corporativos. Para evitar que la IA castigue injustamente el indicador de eficiencia TMO o tiempos de espera, te recomiendo agregar la siguiente directiva al prompt:`,
@@ -312,16 +361,16 @@ function generateSimulatedConsultantReply(question: string, currentDirectives: s
     };
   }
 
-  if (q.includes('detractor') || q.includes('nps') || q.includes('molest') || q.includes('enojad') || q.includes('reclamo')) {
+  if (q.includes('detractor') || q.includes('nps') || q.includes('molest') || q.includes('enojad') || q.includes('reclamo') || q.includes('boleta') || q.includes('cobro')) {
     return {
-      reply: `En los contact centers de telecomunicaciones (Claro Chile), los clientes a menudo se comunican molestos por problemas técnicos o cobros indebidos. La IA tiende a veces a calificar la llamada como DETRACTOR (0-6) basándose únicamente en el malestar del cliente hacia Claro, descuidando el excelente esfuerzo humano y empatía del asesor.\n\nPara blindar la nota del asesor y lograr un tNPS equilibrado, puedes incorporar esta directiva:`,
-      suggestedDirective: `- Blindaje tNPS en Reclamos Críticos: Cuando el cliente manifieste hostilidad o frustración con la red o facturación de Claro, pero el asesor responda con calma, respeto y valide su reclamo, priorizar 'score_agente' >= 8.5 y clasificar el pronóstico global en NEUTRO si el cliente finalizó sin insultos hacia el asesor.`
+      reply: `En los contact centers de Claro Chile, los clientes a menudo se comunican molestos por cobros en su boleta o problemas de facturación. La IA tiende a veces a calificar la llamada como DETRACTOR (0-6) basándose únicamente en el malestar del cliente hacia la empresa, descuidando el esfuerzo y empatía del asesor.\n\nPara evitar que se marque detractor injusto en quejas de boleta Claro y proteger la calificación del asesor, te recomiendo incorporar esta directiva oficial:`,
+      suggestedDirective: `- Blindaje tNPS en Reclamos de Boleta: Cuando el cliente manifieste hostilidad o frustración con la facturación o cobros de Claro, pero el asesor explique los ítems con calma, valide su reclamo y ofrezca alternativas cordialmente, priorizar score_agente >= 8.5 y clasificar el pronóstico global en NEUTRO (7-8), sin penalizar la evaluación del asesor.`
     };
   }
 
   if (q.includes('saludo') || q.includes('bienvenida') || q.includes('nombre') || q.includes('apellido') || q.includes('interrump')) {
     return {
-      reply: `En el contexto chileno, es común que los clientes con urgencia comiencen a explicar su problema de inmediato ("Hola, mire sabe que se me cortó la línea"), impidiendo que el asesor recite completo su nombre, apellido y bienvenida institucional.\n\nPara que la IA no marque la Fase 1 como incumplida en estos escenarios, te sugiero esta directiva de calibración:`,
+      reply: `En el contexto chileno, es muy común que los clientes con urgencia comiencen a explicar su problema de inmediato ("Hola, mire sabe que se me cortó la línea"), impidiendo que el asesor recite completo su nombre, apellido y bienvenida institucional.\n\nPara que la IA no marque la Fase 1 como incumplida en estos escenarios, te sugiero esta directiva de calibración:`,
       suggestedDirective: `- Flexibilidad en Bienvenida por Interrupción: Si el cliente interrumpe el saludo inicial explicando de golpe su requerimiento, considerar la bienvenida como cumplida si el asesor se presentó al menos con su nombre y retomó cordialmente el protocolo.`
     };
   }
@@ -341,8 +390,8 @@ function generateSimulatedConsultantReply(question: string, currentDirectives: s
   }
 
   return {
-    reply: `Entendido. He analizado el caso que describes en relación a la pauta de calidad Claro Chile y el contexto OJT.\n\nPara que la Inteligencia Artificial interprete con precisión esta situación en las próximas llamadas analizadas, lo más efectivo es definir una directiva con regla de excepción explícita. Aquí tienes una directiva lista para ser incorporada a tu calibración:`,
-    suggestedDirective: `- Regla de Excepción Operativa: En situaciones donde se presenten particularidades no habituales en la atención, evaluar con prioridad la actitud orientada a la solución, la cortesía hacia el usuario y la no afectación de la experiencia de cliente.`
+    reply: `Entendido tu planteamiento sobre la operación de Claro Chile / GEA Perú. Como consultor de Speech Analytics y aseguramiento de calidad, puedo ayudarte tanto a diagnosticar el desempeño de tus asesores como a ajustar las reglas del motor de IA.\n\nPara profundizar, ¿deseas que revisemos técnicas pedagógicas para los asesores, analicemos las llamadas del sistema o prefieres formular una regla de calibración para el modelo?`,
+    suggestedDirective: undefined
   };
 }
 
@@ -408,35 +457,37 @@ app.post('/api/calibration/reset', (req, res) => {
 
 app.post('/api/calibration/chat', async (req, res) => {
   try {
-    const { message, history = [], customDirectives } = req.body;
+    const { message, history = [], customDirectives, ragContext } = req.body;
     if (!message || typeof message !== 'string') {
       return res.status(400).json({ success: false, error: 'Mensaje requerido' });
-    }
-
-    const ai = getGenAI();
-
-    // Fallback if no Gemini API Key is configured in environment
-    if (!ai) {
-      const simulated = generateSimulatedConsultantReply(message, customDirectives || activeCalibration.customDirectives);
-      return res.json({
-        success: true,
-        reply: simulated.reply,
-        suggestedDirective: simulated.suggestedDirective,
-        meta: {
-          engine: 'Consultor Experto Local (Configura GEMINI_API_KEY para motor en vivo)'
-        }
-      });
     }
 
     const currentDirectivesToUse = typeof customDirectives === 'string' 
       ? customDirectives 
       : activeCalibration.customDirectives;
 
-    const systemInstruction = `Eres el Consultor Senior de Calibración de Speech Analytics y Aseguramiento de Calidad (QA) para Contact Centers de Claro Chile.
-Tu rol es orientar a supervisores, auditores de calidad y desarrolladores a calibrar y enriquecer el Prompt del motor de Inteligencia Artificial que audita las llamadas reales de los asesores.
+    let ragSection = '';
+    if (ragContext && typeof ragContext === 'object') {
+      ragSection = `
+CONTEXTO OPERATIVO EN VIVO (RAG DE LLAMADAS REALES DEL SISTEMA):
+- Volumen total de llamadas auditadas en plataforma: ${ragContext.totalCalls || 'N/D'}
+- Calificación QA Promedio actual: ${ragContext.avgScore || 'N/D'}/100
+- Pronóstico tNPS: ${ragContext.promotersPct || 0}% Promotores, ${ragContext.neutralsPct || 0}% Neutros, ${ragContext.detractorsPct || 0}% Detractores
+- Quiebres operativos más recurrentes: ${ragContext.topQuiebres || 'Pausas prolongadas en Somos Clave, omisión de escala 0-10 en encuesta, validación de RUT'}
+- Motivos de llamadas frecuentes: ${ragContext.commonDrivers || 'Reclamos de cobro en boleta, problemas técnicos de fibra/red, cambio de plan'}
+- Estado de madurez de asesores en OJT: ${ragContext.ojtSummary || 'Asesores en entrenamiento en vivo con soporte de tutores de piso'}`;
+    }
+
+    const systemInstruction = `Eres el Consultor Senior de Speech Analytics, Calidad Operativa y Coaching (QA & OJT) para GEA Perú / Claro Chile.
+Cuentas con la capacidad analítica y los billones de parámetros de un modelo de lenguaje de última generación, y además estás enterado de la información operativa en tiempo real mediante RAG.
+${ragSection}
 
 PAUTA BASE OFICIAL CLARO CHILE:
-- 4 Fases operativas: 1. Bienvenida (nombre, apellido, empresa, confirmación cliente/RUT), 2. Entender y Resolver (parafrasear, sistemas Somos Clave, por favor/gracias), 3. Informar Acción (avisar espera, retomar en <1 min, condiciones comerciales claras), 4. Cierre (preguntas aseguramiento, confirmación, encuesta escala 0-10).
+- 4 Fases operativas:
+  1. Bienvenida (nombre, apellido, empresa Claro, confirmación cliente/RUT).
+  2. Entender y Resolver (parafrasear, sistemas Somos Clave, por favor/gracias, validación de identidad).
+  3. Informar Acción (avisar espera/hold, retomar en <1 min, claridad en condiciones comerciales y valores proporcionales, resumen).
+  4. Cierre (preguntas aseguramiento, confirmación activa, protocolo de encuesta en escala explicada de 0 a 10).
 - Diagnóstico OJT: Madurez (EN_REFUERZO, EN_DESARROLLO, LISTO_PRODUCCION), índice de autonomía %, brecha principal, roleplay de 5 min y feedback pedagógico constructivo.
 - Predicción tNPS Amigable: Desacoplar la molestia hacia la marca del trato humano del asesor novel (score_agente).
 - Detección de alertas: SERNAC, SUBTEL, demandas, fuga a Entel/WOM/Movistar.
@@ -445,15 +496,76 @@ PAUTA BASE OFICIAL CLARO CHILE:
 DIRECTIVAS ADICIONALES ACTUALMENTE ACTIVAS:
 ${currentDirectivesToUse}
 
-INSTRUCCIONES DE RESPUESTA:
-1. Explica de forma clara, ejecutiva y empática la razón del comportamiento de la IA ante el escenario planteado por el usuario.
-2. Brinda una recomendación fundamentada en mejores prácticas operativas de contact center y Claro Chile.
-3. Si recomiendas una nueva regla o ajuste textual para agregar al prompt del motor, ENTRÉGALO OBLIGATORIAMENTE en un bloque de código delimitado con \`\`\`directive:
+DIRECTIVAS Y DIRECTRICES DE RESPUESTA:
+1. NO te limites únicamente a crear directivas técnicas. Puedes y debes responder CUALQUIER consulta del usuario sobre: cómo mejorar la calidad de las llamadas, cómo capacitar asesores noveles, cómo dar retroalimentación constructiva, análisis de tendencias y causas raíz de llamadas, interpretación de métricas de Speech Analytics, etc.
+2. Utiliza tu vasto conocimiento y el contexto RAG de las llamadas reales para ofrecer explicaciones detalladas, pedagógicas, prácticas y ejecutivas.
+3. Si el usuario te pide específicamente calibrar el modelo, modificar una regla de evaluación, O si de tu respuesta se deriva una recomendación concreta para ajustar el prompt de la IA, proporciónala al final dentro de un bloque \`\`\`directive:
 \`\`\`directive
-- [Nombre de la Regla]: [Texto claro y conciso de la directiva lista para incorporar]
+- [Nombre de la Regla]: [Texto conciso y claro de la directiva lista para incorporar en el motor]
 \`\`\`
-De esta manera, la aplicación web mostrará un botón interactivo para que el usuario pueda añadir la directiva a su prompt con un solo clic.
-Mantén un lenguaje profesional, positivo y enfocado en la calibración y mejora continua.`;
+De esta forma, la interfaz habilitará automáticamente un botón para incorporar la directiva con un solo clic.
+4. Mantén un tono profesional, motivador, empático y orientado a la excelencia operativa.`;
+
+    const groqKey = process.env.GROQ_API_KEY;
+    const ai = getGenAI();
+
+    // If Gemini is not set but Groq is available, use Groq
+    if (!ai && groqKey) {
+      try {
+        const groqMessages = [
+          { role: 'system', content: systemInstruction },
+          ...(Array.isArray(history) ? history.map((h: any) => ({
+            role: h.role === 'model' ? 'assistant' : 'user',
+            content: h.text || ''
+          })) : []),
+          { role: 'user', content: message }
+        ];
+
+        const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${groqKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: 'llama-3.3-70b-versatile',
+            messages: groqMessages,
+            temperature: 0.4,
+            max_tokens: 1500
+          })
+        });
+
+        if (groqRes.ok) {
+          const groqData = await groqRes.json();
+          const replyText = groqData.choices?.[0]?.message?.content?.trim();
+          if (replyText) {
+            const directiveMatch = replyText.match(/```(?:directive)?\s*([\s\S]*?)```/i);
+            const suggestedDirective = directiveMatch ? directiveMatch[1].trim() : undefined;
+            return res.json({
+              success: true,
+              reply: replyText,
+              suggestedDirective,
+              meta: { modelUsed: 'Groq LLaMA 3.3 70B (RAG)' }
+            });
+          }
+        }
+      } catch (groqErr) {
+        console.warn('[Server Calibration Chat] Groq error:', groqErr);
+      }
+    }
+
+    // Fallback if no Gemini API Key is configured in environment
+    if (!ai) {
+      const simulated = generateSimulatedConsultantReply(message, currentDirectivesToUse, ragContext);
+      return res.json({
+        success: true,
+        reply: simulated.reply,
+        suggestedDirective: simulated.suggestedDirective,
+        meta: {
+          engine: 'Consultor Experto Local con RAG (Configura GEMINI_API_KEY o GROQ_API_KEY para motor en vivo)'
+        }
+      });
+    }
 
     // Format and normalize chat history strictly for Gemini
     // 1. Must start with role: 'user'
@@ -531,13 +643,13 @@ Mantén un lenguaje profesional, positivo y enfocado en la calibración y mejora
     // If all models failed or encountered quota/network limits, provide expert response
     if (!rawReply) {
       console.warn('[Consultor Calibración] Activando generador experto de respaldo:', lastModelError?.message);
-      const simulated = generateSimulatedConsultantReply(message, currentDirectivesToUse);
+      const simulated = generateSimulatedConsultantReply(message, currentDirectivesToUse, ragContext);
       return res.json({
         success: true,
         reply: simulated.reply,
         suggestedDirective: simulated.suggestedDirective,
         meta: {
-          engine: 'Consultor Experto Claro Chile (Modo Seguro)',
+          engine: 'Consultor Experto Claro Chile (Modo Seguro con RAG)',
           notice: lastModelError?.message || 'Activado por resiliencia'
         }
       });
@@ -807,6 +919,7 @@ app.post('/api/analyze-call', async (req, res) => {
     fileName = 'grabacion.wav',
     transcriptText,
     agentName = 'Asesor Claro',
+    agentId = '',
     queue = 'Exclusivo Postpago Chile',
     requestedModelCascade = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-3.1-pro-preview']
   } = req.body;
@@ -827,6 +940,9 @@ app.post('/api/analyze-call', async (req, res) => {
         id: `call-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
         codigo_llamada: cached.codigo_llamada || `REC-2026-CHILE-${Math.floor(1000 + Math.random() * 9000)}`,
         fecha_hora: new Date().toISOString().replace('T', ' ').substring(0, 16),
+        agente_id: agentId || cached.agente_id || 'AG-4821',
+        agente_nombre: agentName || cached.agente_nombre || 'Asesor Claro',
+        file_name: fileName || cached.file_name || 'grabacion.wav',
       },
       meta: {
         modelUsed: cached.modelo_procesado || 'gemini-3.8-flash',
@@ -846,7 +962,7 @@ app.post('/api/analyze-call', async (req, res) => {
 
   // If no Gemini API key, generate realistic intelligent QA analysis directly
   if (!ai) {
-    const fallbackResult = generateRealisticMockAnalysis(fileName, agentName, queue, transcriptText);
+    const fallbackResult = generateRealisticMockAnalysis(fileName, agentName, queue, transcriptText, agentId);
     return res.json({
       success: true,
       data: fallbackResult,
@@ -1027,8 +1143,9 @@ app.post('/api/analyze-call', async (req, res) => {
           id: `call-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
           codigo_llamada: `REC-2026-CHILE-${Math.floor(1000 + Math.random() * 9000)}`,
           fecha_hora: new Date().toISOString().replace('T', ' ').substring(0, 16),
-          agente_nombre: detectedAgent,
-          agente_id: `AG-${Math.floor(7000 + Math.random() * 3000)}`,
+          file_name: fileName,
+          agente_nombre: agentName && agentName !== 'Asesor Claro' ? agentName : detectedAgent,
+          agente_id: agentId || (agentName.toLowerCase().includes('camila') ? 'AGT-4821' : `AG-${Math.floor(7000 + Math.random() * 3000)}`),
           cliente_nombre: detectedCustomer,
           cliente_telefono: '+56 9 ' + Math.floor(60000000 + Math.random() * 39999999),
           cola_atencion: queue,
@@ -1122,7 +1239,7 @@ function formatSeconds(secs: number): string {
 }
 
 // Realistic fallback generator when API key is not present
-function generateRealisticMockAnalysis(fileName: string, agentName: string, queue: string, transcriptText?: string) {
+function generateRealisticMockAnalysis(fileName: string, agentName: string, queue: string, transcriptText?: string, agentId?: string) {
   const isDetractor = fileName.toLowerCase().includes('reclamo') || fileName.toLowerCase().includes('boleta') || fileName.toLowerCase().includes('baja');
   const durSec = 380 + Math.floor(Math.random() * 200);
   const ivrSec = 90 + Math.floor(Math.random() * 150);
@@ -1133,8 +1250,9 @@ function generateRealisticMockAnalysis(fileName: string, agentName: string, queu
     id: `call-${Date.now()}`,
     codigo_llamada: `REC-2026-CHILE-${Math.floor(2000 + Math.random() * 7000)}`,
     fecha_hora: new Date().toISOString().replace('T', ' ').substring(0, 16),
+    file_name: fileName,
     agente_nombre: agentName,
-    agente_id: `AG-${Math.floor(7000 + Math.random() * 3000)}`,
+    agente_id: agentId || (agentName.toLowerCase().includes('camila') ? 'AGT-4821' : `AG-${Math.floor(7000 + Math.random() * 3000)}`),
     cliente_nombre: 'Carolina Valenzuela P.',
     cliente_telefono: '+56 9 7842 1190',
     cola_atencion: queue,

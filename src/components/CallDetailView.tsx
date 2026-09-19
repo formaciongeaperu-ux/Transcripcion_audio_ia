@@ -154,6 +154,11 @@ export const CallDetailView: React.FC<CallDetailViewProps> = ({
               <span className="rounded-full bg-[#E8F0FE] px-2 py-0.5 text-[11px] font-medium text-[#1A73E8]">
                 {call.cola_atencion}
               </span>
+              {call.file_name && (
+                <span className="rounded-md border border-[#DADCE0] bg-[#F8F9FA] px-2 py-0.5 font-mono text-[11px] text-[#3C4043]" title="Archivo de audio cargado">
+                  🎵 {call.file_name}
+                </span>
+              )}
               {call.diagnostico_ojt?.requiere_intervencion_tutor && (
                 <span className="flex items-center gap-1 rounded-full bg-[#FCE8E6] px-2 py-0.5 text-[10px] font-bold text-[#EA4335]">
                   <GraduationCap className="h-3 w-3" />
@@ -162,7 +167,7 @@ export const CallDetailView: React.FC<CallDetailViewProps> = ({
               )}
             </div>
             <p className="text-xs text-[#5F6368]">
-              Asesor: <strong className="text-[#202124]">{call.agente_nombre}</strong> ({call.agente_id}) • {call.fecha_hora}
+              Asesor: <strong className="text-[#202124]">{call.agente_nombre}</strong> • ID Asesor: <span className="font-mono font-bold text-[#1A73E8] bg-[#E8F0FE] px-1.5 py-0.5 rounded">{call.agente_id}</span> • {call.fecha_hora}
             </p>
           </div>
         </div>

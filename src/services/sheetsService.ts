@@ -4,6 +4,7 @@ export const SHEET_TAB_NAME = 'Auditorias_Llamadas';
 
 export const SHEET_HEADERS = [
   'Código Llamada',
+  'Nombre Archivo Audio',
   'Fecha y Hora',
   'Asesor',
   'ID Asesor',
@@ -188,6 +189,7 @@ function callToRow(call: CallRecord): any[] {
 
   return [
     call.codigo_llamada || 'CALL-' + call.id.slice(-6),
+    call.file_name || `${call.codigo_llamada}.wav`,
     call.fecha_hora || new Date().toISOString().replace('T', ' ').slice(0, 16),
     call.agente_nombre || 'Asesor Claro',
     call.agente_id || 'AG-001',

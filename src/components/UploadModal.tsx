@@ -35,7 +35,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   const [optimizeAudio, setOptimizeAudio] = useState<boolean>(true);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [overallProgress, setOverallProgress] = useState<number>(0);
-  const [agentName, setAgentName] = useState('Asesor Claro');
+  const [agentName, setAgentName] = useState('Camila Navarro V.');
+  const [agentId, setAgentId] = useState('AGT-4821');
   const [queueName, setQueueName] = useState('Exclusivo Postpago Chile');
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -56,12 +57,18 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         file.name.endsWith('.ogg') ||
         file.name.endsWith('.webm')
       ) {
+        // Smart ID pattern extraction from file name if available (e.g. AGT-4821, AG_123, 18432110-K)
+        const match = file.name.match(/\b(AGT[-_]?[0-9A-Za-z]+|AG[-_]?[0-9A-Za-z]+|[0-9]{7,8}[-kK0-9]?)\b/i);
+        const itemAgentId = match ? match[0].replace('_', '-') : agentId;
+
         newItems.push({
           id: `up-${Date.now()}-${i}-${Math.random().toString(36).substr(2, 4)}`,
           file,
           originalSize: file.size,
           progress: 0,
           status: 'pending',
+          agentId: itemAgentId,
+          agentName: agentName
         });
       }
     }
@@ -134,6 +141,9 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           );
         }
 
+        const targetAgentId = item.agentId || agentId || 'AGT-4821';
+        const targetAgentName = item.agentName || agentName || 'Asesor Claro';
+
         // 2. Send to backend Gemini analysis API
         const response = await fetch('/api/analyze-call', {
           method: 'POST',
@@ -142,7 +152,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
             audioBase64: processedBase64,
             mimeType: 'audio/wav',
             fileName: item.file.name,
-            agentName,
+            agentName: targetAgentName,
+            agentId: targetAgentId,
             queue: queueName,
           }),
         });
@@ -162,6 +173,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           callData.audio_url = audioUrl;
           callData.audioFile = item.file;
           callData.file_name = item.file.name;
+          callData.agente_id = targetAgentId;
+          callData.agente_nombre = targetAgentName;
           completedCalls.push(callData);
 
           setItems((prev) =>
@@ -323,25 +336,50 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           </div>
 
           {/* Context Fields */}
-          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
-              <label className="text-[11px] font-bold text-[#5F6368]">Asesor Asignado:</label>
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-bold text-[#202124]">ID Asesor (RUT / Código):</label>
+                <span className="text-[10px] font-semibold text-[#1A73E8]">Para cruzar datos</span>
+              </div>
               <input
                 type="text"
-                value={agentName}
-                onChange={(e) => setAgentName(e.target.value)}
-                placeholder="Ej. Camila Navarro V."
-                className="mt-1 h-9 w-full rounded-xl border border-[#DADCE0] px-3 text-xs outline-none focus:border-[#1A73E8]"
+                value={agentId}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setAgentId(val);
+                  setItems((prev) =>
+                    prev.map((it) => (it.status === 'pending' ? { ...it, agentId: val } : it))
+                  );
+                }}
+                placeholder="Ej. AGT-4821 o 18432110-K"
+                className="mt-1 h-9 w-full rounded-xl border border-[#DADCE0] bg-white px-3 font-mono text-xs font-semibold text-[#202124] outline-none transition focus:border-[#1A73E8] focus:ring-1 focus:ring-[#1A73E8]"
               />
             </div>
             <div>
-              <label className="text-[11px] font-bold text-[#5F6368]">Cola de Atención Claro:</label>
+              <label className="text-[11px] font-bold text-[#202124]">Asesor Asignado:</label>
+              <input
+                type="text"
+                value={agentName}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setAgentName(val);
+                  setItems((prev) =>
+                    prev.map((it) => (it.status === 'pending' ? { ...it, agentName: val } : it))
+                  );
+                }}
+                placeholder="Ej. Camila Navarro V."
+                className="mt-1 h-9 w-full rounded-xl border border-[#DADCE0] bg-white px-3 text-xs text-[#202124] outline-none transition focus:border-[#1A73E8] focus:ring-1 focus:ring-[#1A73E8]"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] font-bold text-[#202124]">Cola de Atención Claro:</label>
               <input
                 type="text"
                 value={queueName}
                 onChange={(e) => setQueueName(e.target.value)}
                 placeholder="Ej. Exclusivo Postpago Chile"
-                className="mt-1 h-9 w-full rounded-xl border border-[#DADCE0] px-3 text-xs outline-none focus:border-[#1A73E8]"
+                className="mt-1 h-9 w-full rounded-xl border border-[#DADCE0] bg-white px-3 text-xs text-[#202124] outline-none transition focus:border-[#1A73E8] focus:ring-1 focus:ring-[#1A73E8]"
               />
             </div>
           </div>
@@ -412,8 +450,30 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                       </div>
                     </div>
 
-                    {/* Status badge */}
-                    <div className="flex items-center gap-2">
+                    {/* Status badge and ID Asesor */}
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex items-center gap-1 rounded-lg border border-[#DADCE0] bg-white px-2 py-0.5" title="ID de Asesor para cruce">
+                        <span className="text-[10px] font-bold text-[#5F6368]">ID:</span>
+                        {!isProcessing && it.status === 'pending' ? (
+                          <input
+                            type="text"
+                            value={it.agentId || agentId}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setItems((prev) =>
+                                prev.map((x) => (x.id === it.id ? { ...x, agentId: val } : x))
+                              );
+                            }}
+                            className="w-20 font-mono text-[11px] font-bold text-[#1A73E8] outline-none"
+                            placeholder="ID Asesor"
+                          />
+                        ) : (
+                          <span className="font-mono text-[11px] font-bold text-[#1A73E8]">
+                            {it.agentId || agentId}
+                          </span>
+                        )}
+                      </div>
+
                       {it.status === 'pending' && (
                         <span className="rounded-full bg-[#E8EAED] px-2 py-0.5 text-[10px] font-bold text-[#5F6368]">
                           En espera

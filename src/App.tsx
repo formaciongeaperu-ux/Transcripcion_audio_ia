@@ -366,7 +366,12 @@ export default function App() {
             )}
 
             {activeTab === 'calibration' && (
-              <CalibrationView />
+              <CalibrationView
+                calls={calls}
+                onNotify={(msg, type) => {
+                  console.log(`[Calibration Notification] [${type || 'info'}]: ${msg}`);
+                }}
+              />
             )}
           </div>
         </main>
