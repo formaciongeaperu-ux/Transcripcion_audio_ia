@@ -221,19 +221,6 @@ export const AuthModal: React.FC = () => {
             </div>
           </div>
 
-          {/* Información sobre Rol */}
-          {tab === 'register' && (
-            <div className="rounded-xl border border-[#DADCE0] bg-[#F8F9FA] p-3 text-xs text-[#5F6368]">
-              <div className="flex items-center gap-2 font-bold text-[#202124]">
-                <ShieldCheck className="h-4 w-4 text-[#1A73E8]" />
-                <span>Asignación de Roles por Administrador</span>
-              </div>
-              <p className="mt-1 text-[11px] leading-relaxed text-[#5F6368]">
-                Las cuentas nuevas se registran con perfil inicial de <strong>Asesor</strong>. El Administrador asignará los roles de <strong>Supervisor</strong> o <strong>Auditor QA</strong> desde el panel de gestión.
-              </p>
-            </div>
-          )}
-
           {/* Botón Principal */}
           <button
             type="submit"

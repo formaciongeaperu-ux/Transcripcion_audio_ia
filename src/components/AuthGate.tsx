@@ -230,19 +230,6 @@ export const AuthGate: React.FC<AuthGateProps> = ({ initialTab = 'register' }) =
               </div>
             </div>
 
-            {/* Note on Role assignment */}
-            {tab === 'register' && (
-              <div className="rounded-xl border border-[#DADCE0] bg-[#F8F9FA] p-3 text-xs text-[#5F6368]">
-                <div className="flex items-center gap-1.5 font-bold text-[#202124]">
-                  <ShieldCheck className="h-4 w-4 text-[#1A73E8]" />
-                  <span>Asignación de Roles por Administrador</span>
-                </div>
-                <p className="mt-1 text-[11px] leading-relaxed text-[#5F6368]">
-                  Tu cuenta se creará con perfil inicial de <strong>Asesor</strong>. El Administrador te asignará el rol de <strong>Supervisor</strong> o <strong>Auditor QA</strong> desde el panel interno.
-                </p>
-              </div>
-            )}
-
             {/* Submit Button */}
             <button
               id="btn-auth-submit"
