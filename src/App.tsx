@@ -11,6 +11,7 @@ import { SheetsModal } from './components/SheetsModal';
 import { CommandPalette } from './components/CommandPalette';
 import { AuthModal } from './components/AuthModal';
 import { AuthGate } from './components/AuthGate';
+import { UserManagementModal } from './components/UserManagementModal';
 import { Loader2 } from 'lucide-react';
 import { CallRecord, UploadItem } from './types';
 import { exportCallsToExcel, exportCallsToCSV, exportSingleCallReport } from './utils/exportUtils';
@@ -42,6 +43,7 @@ export default function App() {
   const [uploadModalOpen, setUploadModalOpen] = useState<boolean>(false);
   const [queueModalOpen, setQueueModalOpen] = useState<boolean>(false);
   const [sheetsModalOpen, setSheetsModalOpen] = useState<boolean>(false);
+  const [userManagementOpen, setUserManagementOpen] = useState<boolean>(false);
   const [deferredQueue, setDeferredQueue] = useState<UploadItem[]>([]);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [isRetryingQueue, setIsRetryingQueue] = useState<boolean>(false);
@@ -389,6 +391,8 @@ export default function App() {
           setActiveTab={(tab) => {
             if (tab === 'queue') {
               setQueueModalOpen(true);
+            } else if (tab === 'users') {
+              setUserManagementOpen(true);
             } else {
               setActiveTab(tab);
             }
@@ -398,6 +402,7 @@ export default function App() {
           onOpenUpload={() => setUploadModalOpen(true)}
           onOpenExport={handleExportFull}
           onOpenSheets={() => setSheetsModalOpen(true)}
+          onOpenUserManagement={() => setUserManagementOpen(true)}
           isSheetsConnected={!!connectedSpreadsheet}
           sheetsTitle={connectedSpreadsheet?.title}
           deferredCount={deferredQueue.length}
@@ -493,6 +498,11 @@ export default function App() {
       />
 
       <AuthModal />
+
+      <UserManagementModal
+        isOpen={userManagementOpen}
+        onClose={() => setUserManagementOpen(false)}
+      />
     </div>
   );
 }

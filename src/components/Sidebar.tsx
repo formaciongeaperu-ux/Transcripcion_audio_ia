@@ -11,10 +11,12 @@ import {
   ChevronRight,
   TrendingUp,
   Cpu,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Users,
+  ShieldCheck
 } from 'lucide-react';
 
-export type TabType = 'dashboard' | 'explorer' | 'audit' | 'queue' | 'calibration';
+export type TabType = 'dashboard' | 'explorer' | 'audit' | 'queue' | 'calibration' | 'users';
 
 interface SidebarProps {
   activeTab: TabType;
@@ -24,6 +26,7 @@ interface SidebarProps {
   onOpenUpload: () => void;
   onOpenExport: () => void;
   onOpenSheets: () => void;
+  onOpenUserManagement?: () => void;
   isSheetsConnected: boolean;
   sheetsTitle?: string;
   deferredCount: number;
@@ -38,6 +41,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenUpload,
   onOpenExport,
   onOpenSheets,
+  onOpenUserManagement,
   isSheetsConnected,
   sheetsTitle,
   deferredCount,
@@ -79,6 +83,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
       sublabel: 'Ajuste de pauta y chatbot',
       icon: SlidersHorizontal,
       badge: null,
+    },
+    {
+      id: 'users' as TabType,
+      label: 'Gestión de Usuarios & Roles',
+      sublabel: 'Delegación y permisos',
+      icon: Users,
+      badge: 'Admin',
+      badgeColor: 'bg-[#E8F0FE] text-[#1A73E8]',
     },
   ];
 
@@ -201,6 +213,35 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           )}
         </button>
+
+        {/* Administración de Usuarios y Roles */}
+        {onOpenUserManagement && (
+          <button
+            id="btn-sidebar-user-management"
+            onClick={onOpenUserManagement}
+            className="group flex w-full items-center gap-3 rounded-full px-3.5 py-2.5 text-sm font-medium text-[#3C4043] transition hover:bg-[#F1F3F4]"
+            title={!isOpen ? 'Gestión de Usuarios & Roles' : undefined}
+          >
+            <div className="relative">
+              <Users className="h-5 w-5 shrink-0 text-[#1A73E8]" />
+              <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#1A73E8] opacity-75"></span>
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-[#1A73E8]"></span>
+              </span>
+            </div>
+            {isOpen && (
+              <div className="flex-1 text-left">
+                <div className="flex items-center justify-between">
+                  <span className="leading-tight font-semibold text-[#202124]">Usuarios & Roles</span>
+                  <span className="rounded-full bg-[#E8F0FE] border border-[#AECBFA] px-1.5 py-0.5 text-[9px] font-bold text-[#1A73E8]">
+                    Admin
+                  </span>
+                </div>
+                <div className="text-[11px] font-normal text-[#5F6368]">Delegar roles & asesores</div>
+              </div>
+            )}
+          </button>
+        )}
       </div>
 
       {/* Bottom Info Card (Google Cloud Project context) */}
