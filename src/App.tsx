@@ -10,6 +10,8 @@ import { DeferredQueueModal } from './components/DeferredQueueModal';
 import { SheetsModal } from './components/SheetsModal';
 import { CommandPalette } from './components/CommandPalette';
 import { AuthModal } from './components/AuthModal';
+import { AuthGate } from './components/AuthGate';
+import { Loader2 } from 'lucide-react';
 import { CallRecord, UploadItem } from './types';
 import { exportCallsToExcel, exportCallsToCSV, exportSingleCallReport } from './utils/exportUtils';
 import { SpreadsheetInfo, appendCallsToSpreadsheet } from './services/sheetsService';
@@ -46,10 +48,16 @@ export default function App() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState<boolean>(false);
   const [selectedCohort, setSelectedCohort] = useState<string>('all');
 
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
 
-  // Cargar llamadas desde Supabase al iniciar y sincronizar con la nube
+  // Cargar llamadas desde Supabase al iniciar sesión y limpiar memoria al cerrar sesión
   useEffect(() => {
+    if (!user) {
+      setCalls([]);
+      setSelectedCall(null);
+      return;
+    }
+
     let isMounted = true;
     fetchCallRecordsFromSupabase().then(({ data, error }) => {
       if (!isMounted) return;
@@ -59,7 +67,7 @@ export default function App() {
           const localOnly = prev.filter((p) => !dbIds.has(p.id));
           // Si hay llamadas locales que aún no están en la nube, sincronizarlas
           if (localOnly.length > 0) {
-            bulkSaveCallRecordsToSupabase(localOnly, user?.id).catch(console.warn);
+            bulkSaveCallRecordsToSupabase(localOnly, user.id).catch(console.warn);
           }
           return [...data, ...localOnly];
         });
@@ -70,7 +78,7 @@ export default function App() {
           try {
             const parsed = JSON.parse(saved);
             if (Array.isArray(parsed) && parsed.length > 0) {
-              bulkSaveCallRecordsToSupabase(parsed, user?.id).catch(console.warn);
+              bulkSaveCallRecordsToSupabase(parsed, user.id).catch(console.warn);
             }
           } catch {}
         }
@@ -333,6 +341,23 @@ export default function App() {
   const handleExportSingle = (call: CallRecord) => {
     exportSingleCallReport(call);
   };
+
+  // Pantalla de carga mientras verifica sesión en Supabase
+  if (authLoading) {
+    return (
+      <div className="flex min-h-screen w-full flex-col items-center justify-center bg-[#F8F9FA] text-[#202124]">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="h-8 w-8 animate-spin text-[#DA291C]" />
+          <span className="text-xs font-semibold text-[#5F6368]">Verificando sesión segura en Claro QA...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // Si no ha iniciado sesión, protege los datos operativos y muestra el formulario de acceso/registro
+  if (!user) {
+    return <AuthGate />;
+  }
 
   return (
     <div className="flex min-h-screen flex-col bg-[#F8F9FA] text-[#202124] antialiased">

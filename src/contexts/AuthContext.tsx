@@ -179,6 +179,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(null);
     setSession(null);
     setProfile(null);
+    try {
+      localStorage.removeItem('claro_speech_calls_v2');
+    } catch {}
   };
 
   const refreshProfile = async () => {
