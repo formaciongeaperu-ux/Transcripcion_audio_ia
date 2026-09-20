@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   Upload, 
   Download, 
@@ -9,9 +9,16 @@ import {
   FileSpreadsheet,
   Command,
   Activity,
-  Filter
+  Filter,
+  User,
+  LogOut,
+  Shield,
+  CheckCircle2,
+  Database
 } from 'lucide-react';
 import { GeaLogo } from './GeaLogo';
+import { useAuth } from '../contexts/AuthContext';
+import { UserRole } from '../types';
 
 interface HeaderProps {
   sidebarOpen: boolean;
@@ -49,6 +56,33 @@ export const Header: React.FC<HeaderProps> = ({
   selectedCohort = 'all',
   setSelectedCohort,
 }) => {
+  const { user, profile, openAuthModal, signOut } = useAuth();
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const getRoleBadge = (role?: UserRole) => {
+    switch (role) {
+      case 'super_admin':
+        return { label: 'Admin', color: 'bg-purple-100 text-purple-800 border-purple-200' };
+      case 'supervisor':
+        return { label: 'Supervisor', color: 'bg-blue-100 text-blue-800 border-blue-200' };
+      case 'agent':
+        return { label: 'Asesor', color: 'bg-amber-100 text-amber-800 border-amber-200' };
+      case 'qa_auditor':
+      default:
+        return { label: 'Auditor QA', color: 'bg-emerald-100 text-emerald-800 border-emerald-200' };
+    }
+  };
   return (
     <header className="sticky top-0 z-30 flex h-16 w-full items-center justify-between border-b border-[#DADCE0] bg-white px-4 shadow-[0_1px_3px_rgba(60,64,67,0.08)] md:px-6">
       {/* Left: Hamburger & Claro Enterprise Brand */}
@@ -176,6 +210,87 @@ export const Header: React.FC<HeaderProps> = ({
           <span className="hidden sm:inline">Cargar Audios</span>
           <span className="sm:hidden">Cargar</span>
         </button>
+
+        {/* Supabase User Profile & Authentication Button */}
+        <div className="relative" ref={menuRef}>
+          {user ? (
+            <button
+              id="btn-user-profile"
+              onClick={() => setUserMenuOpen(!userMenuOpen)}
+              className="flex items-center gap-2 rounded-full border border-[#DADCE0] bg-white py-1 pl-1 pr-2.5 shadow-2xs transition hover:bg-[#F8F9FA]"
+            >
+              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[#0B192C] text-xs font-bold text-white shadow-xs">
+                {(profile?.full_name || user.email || 'U').slice(0, 2).toUpperCase()}
+              </div>
+              <div className="hidden flex-col text-left lg:flex">
+                <span className="text-xs font-bold leading-tight text-[#202124] max-w-[110px] truncate">
+                  {profile?.full_name || user.email?.split('@')[0]}
+                </span>
+                <span className="text-[10px] text-[#5F6368] leading-tight">
+                  {getRoleBadge(profile?.role).label}
+                </span>
+              </div>
+              <span
+                className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${
+                  getRoleBadge(profile?.role).color
+                }`}
+              >
+                {getRoleBadge(profile?.role).label}
+              </span>
+            </button>
+          ) : (
+            <button
+              id="btn-login-trigger"
+              onClick={openAuthModal}
+              className="flex items-center gap-1.5 rounded-full border border-[#1A73E8] bg-[#E8F0FE] px-3 py-1.5 text-xs font-bold text-[#1A73E8] shadow-xs transition hover:bg-[#D2E3FC] active:scale-95"
+            >
+              <User className="h-3.5 w-3.5" />
+              <span>Iniciar Sesión</span>
+            </button>
+          )}
+
+          {/* User Dropdown Menu */}
+          {userMenuOpen && user && (
+            <div className="absolute right-0 mt-2 w-64 origin-top-right rounded-2xl border border-[#DADCE0] bg-white p-2 shadow-xl z-50 animate-in fade-in">
+              <div className="border-b border-[#F1F3F4] px-3 py-2.5">
+                <div className="text-xs font-bold text-[#202124]">
+                  {profile?.full_name || 'Usuario'}
+                </div>
+                <div className="text-[11px] text-[#5F6368] truncate">{user.email}</div>
+                <div className="mt-2 flex items-center gap-2">
+                  <span
+                    className={`inline-block rounded-full border px-2 py-0.5 text-[10px] font-bold ${
+                      getRoleBadge(profile?.role).color
+                    }`}
+                  >
+                    Rol: {getRoleBadge(profile?.role).label}
+                  </span>
+                  {profile?.campana && (
+                    <span className="text-[10px] font-medium text-[#80868B]">
+                      {profile.campana}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="px-3 py-2 text-[11px] text-[#5F6368] flex items-center gap-2 border-b border-[#F1F3F4]">
+                <Database className="h-3.5 w-3.5 text-[#137333]" />
+                <span>Base en Nube: <strong className="text-[#137333]">Supabase Conectado</strong></span>
+              </div>
+
+              <button
+                onClick={() => {
+                  setUserMenuOpen(false);
+                  signOut();
+                }}
+                className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-[#C5221F] hover:bg-[#FCE8E6] transition"
+              >
+                <LogOut className="h-4 w-4" />
+                <span>Cerrar Sesión</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </header>
   );

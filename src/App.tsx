@@ -9,11 +9,14 @@ import { UploadModal } from './components/UploadModal';
 import { DeferredQueueModal } from './components/DeferredQueueModal';
 import { SheetsModal } from './components/SheetsModal';
 import { CommandPalette } from './components/CommandPalette';
+import { AuthModal } from './components/AuthModal';
 import { CallRecord, UploadItem } from './types';
 import { exportCallsToExcel, exportCallsToCSV, exportSingleCallReport } from './utils/exportUtils';
 import { SpreadsheetInfo, appendCallsToSpreadsheet } from './services/sheetsService';
 import { DriveFolderInfo, uploadAudioToDrive } from './services/driveService';
 import { getAccessToken } from './services/googleAuth';
+import { fetchCallRecordsFromSupabase, saveCallRecordToSupabase, bulkSaveCallRecordsToSupabase } from './services/supabaseService';
+import { useAuth } from './contexts/AuthContext';
 
 export default function App() {
   const [calls, setCalls] = useState<CallRecord[]>(() => {
@@ -42,6 +45,41 @@ export default function App() {
   const [isRetryingQueue, setIsRetryingQueue] = useState<boolean>(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState<boolean>(false);
   const [selectedCohort, setSelectedCohort] = useState<string>('all');
+
+  const { user } = useAuth();
+
+  // Cargar llamadas desde Supabase al iniciar y sincronizar con la nube
+  useEffect(() => {
+    let isMounted = true;
+    fetchCallRecordsFromSupabase().then(({ data, error }) => {
+      if (!isMounted) return;
+      if (data && data.length > 0) {
+        setCalls((prev) => {
+          const dbIds = new Set(data.map((d) => d.id));
+          const localOnly = prev.filter((p) => !dbIds.has(p.id));
+          // Si hay llamadas locales que aún no están en la nube, sincronizarlas
+          if (localOnly.length > 0) {
+            bulkSaveCallRecordsToSupabase(localOnly, user?.id).catch(console.warn);
+          }
+          return [...data, ...localOnly];
+        });
+      } else if (data && data.length === 0) {
+        // Si la base en Supabase está vacía pero hay historial en el navegador, subirlo
+        const saved = localStorage.getItem('claro_speech_calls_v2');
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              bulkSaveCallRecordsToSupabase(parsed, user?.id).catch(console.warn);
+            }
+          } catch {}
+        }
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [user]);
 
   // Global keyboard shortcut Ctrl+K / Cmd+K to open Command Palette
   useEffect(() => {
@@ -208,6 +246,13 @@ export default function App() {
         } catch (err) {
           console.warn('Auto-sync to Google Sheets failed:', err);
         }
+      }
+
+      // Guardar automáticamente en Supabase Cloud Database
+      for (const call of newCalls) {
+        saveCallRecordToSupabase(call, user?.id).catch((err) =>
+          console.warn('[Supabase] Error al persistir llamada:', err)
+        );
       }
     }
   };
@@ -421,6 +466,8 @@ export default function App() {
         autoUploadDrive={autoUploadDrive}
         onToggleAutoUploadDrive={handleToggleAutoUploadDrive}
       />
+
+      <AuthModal />
     </div>
   );
 }

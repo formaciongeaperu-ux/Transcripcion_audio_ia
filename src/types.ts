@@ -269,3 +269,16 @@ export interface CalibrationChatMessage {
   timestamp: string;
   suggestedDirective?: string;
 }
+
+export type UserRole = 'super_admin' | 'supervisor' | 'qa_auditor' | 'agent';
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  full_name: string;
+  role: UserRole;
+  agent_id?: string;
+  campana?: string;
+  avatar_url?: string;
+  created_at?: string;
+}
