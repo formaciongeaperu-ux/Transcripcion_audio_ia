@@ -9,9 +9,11 @@ import {
   Loader2,
   Database,
   BarChart3,
-  Mic
+  Mic,
+  Activity
 } from 'lucide-react';
 import { GeaLogo } from './GeaLogo';
+import { AudioWaveBackground } from './AudioWaveBackground';
 import { useAuth } from '../contexts/AuthContext';
 import { UserRole } from '../types';
 
@@ -82,16 +84,32 @@ export const AuthGate: React.FC<AuthGateProps> = ({ initialTab = 'register' }) =
   return (
     <div
       id="auth-gate-screen"
-      className="relative flex min-h-screen w-full items-center justify-center bg-[#F8F9FA] px-4 py-12 text-[#202124]"
+      className="relative flex min-h-screen w-full items-center justify-center overflow-hidden bg-[#F8F9FA] px-4 py-12 text-[#202124]"
     >
-      {/* Decorative top accent bar */}
-      <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-[#DA291C] via-[#0B192C] to-[#1A73E8]" />
+      {/* Dynamic Animated Acoustic Wave & Grid Background */}
+      <AudioWaveBackground />
 
-      <div className="relative w-full max-w-md">
+      {/* Decorative top accent bar */}
+      <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-[#DA291C] via-[#072242] to-[#0072CE] z-10" />
+
+      <div className="relative z-10 w-full max-w-md">
         {/* Brand Header */}
         <div className="mb-6 text-center">
+          {/* Status pill badge */}
+          <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[#0072CE]/20 bg-white/90 px-3.5 py-1 text-[11px] font-semibold text-[#072242] shadow-xs backdrop-blur-md">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#137333] opacity-75"></span>
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-[#137333]"></span>
+            </span>
+            <span className="font-bold text-[#202124]">GEA QA Engine</span>
+            <span className="text-[#DADCE0]">•</span>
+            <span className="text-[#5F6368]">Speech Analytics</span>
+            <span className="text-[#DADCE0]">•</span>
+            <span className="font-medium text-[#0072CE]">Supabase RLS</span>
+          </div>
+
           <div className="mx-auto mb-3 flex items-center justify-center gap-3">
-            <GeaLogo size={44} className="h-11 w-auto shrink-0 drop-shadow-xs" />
+            <GeaLogo size={46} className="h-12 w-auto shrink-0 drop-shadow-xs" />
             <div className="flex flex-col items-start justify-center text-left">
               <span className="font-['Google_Sans',sans-serif] text-2xl font-black tracking-tight leading-none">
                 <span className="text-[#072242]">GEA </span>
@@ -113,7 +131,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({ initialTab = 'register' }) =
         {/* Auth Card */}
         <div
           id="auth-card-container"
-          className="overflow-hidden rounded-3xl border border-[#DADCE0] bg-white p-6 sm:p-8 shadow-xl"
+          className="relative overflow-hidden rounded-3xl border border-[#DADCE0]/90 bg-white/95 p-6 sm:p-8 shadow-[0_25px_65px_-15px_rgba(7,34,66,0.16)] backdrop-blur-xl"
         >
           {/* Tabs: Iniciar Sesión / Crear Cuenta */}
           <div className="mb-6 flex rounded-xl bg-[#F1F3F4] p-1">
