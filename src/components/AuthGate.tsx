@@ -91,10 +91,16 @@ export const AuthGate: React.FC<AuthGateProps> = ({ initialTab = 'register' }) =
         {/* Brand Header */}
         <div className="mb-6 text-center">
           <div className="mx-auto mb-3 flex items-center justify-center gap-3">
-            <GeaLogo className="h-10 w-auto" />
-            <span className="text-xl font-black tracking-tight text-[#DA291C]">
-              Claro<span className="text-[#0B192C]">QA</span>
-            </span>
+            <GeaLogo size={44} className="h-11 w-auto shrink-0 drop-shadow-xs" />
+            <div className="flex flex-col items-start justify-center text-left">
+              <span className="font-['Google_Sans',sans-serif] text-2xl font-black tracking-tight leading-none">
+                <span className="text-[#072242]">GEA </span>
+                <span className="text-[#0072CE]">PERÚ</span>
+              </span>
+              <span className="mt-1 text-[11px] font-extrabold uppercase tracking-widest text-[#0072CE]">
+                WORKFORCE
+              </span>
+            </div>
           </div>
           <h1 className="text-lg font-extrabold text-[#202124] tracking-tight">
             Plataforma de Speech Analytics & Calidad
