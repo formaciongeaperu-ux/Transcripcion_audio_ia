@@ -1,5 +1,7 @@
 {
   "version": 2,
+  "framework": "vite",
+  "outputDirectory": "dist",
   "functions": {
     "api/**/*.ts": {
       "maxDuration": 60,
