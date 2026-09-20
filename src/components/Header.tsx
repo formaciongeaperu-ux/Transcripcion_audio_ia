@@ -14,11 +14,13 @@ import {
   LogOut,
   Shield,
   CheckCircle2,
-  Database
+  Database,
+  Users
 } from 'lucide-react';
 import { GeaLogo } from './GeaLogo';
 import { useAuth } from '../contexts/AuthContext';
 import { UserRole } from '../types';
+import { UserManagementModal } from './UserManagementModal';
 
 interface HeaderProps {
   sidebarOpen: boolean;
@@ -58,6 +60,7 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const { user, profile, openAuthModal, signOut } = useAuth();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [userManagementOpen, setUserManagementOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -278,6 +281,19 @@ export const Header: React.FC<HeaderProps> = ({
                 <span>Base en Nube: <strong className="text-[#137333]">Supabase Conectado</strong></span>
               </div>
 
+              {/* Botón Gestión de Usuarios y Roles */}
+              <button
+                id="btn-user-management-open"
+                onClick={() => {
+                  setUserMenuOpen(false);
+                  setUserManagementOpen(true);
+                }}
+                className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-[#1A73E8] hover:bg-[#E8F0FE] transition"
+              >
+                <Users className="h-4 w-4 text-[#1A73E8]" />
+                <span>Gestión de Usuarios & Roles</span>
+              </button>
+
               <button
                 onClick={() => {
                   setUserMenuOpen(false);
@@ -292,6 +308,12 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
       </div>
+
+      {/* Modal de Gestión de Usuarios y Roles para Administradores */}
+      <UserManagementModal
+        isOpen={userManagementOpen}
+        onClose={() => setUserManagementOpen(false)}
+      />
     </header>
   );
 };

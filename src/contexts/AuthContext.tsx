@@ -44,18 +44,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (error) {
         // Si no existe fila en profiles, creamos un perfil base
         console.warn('[Auth] Perfil no encontrado, creando por defecto:', error.message);
+        const isSuperAdminEmail = userEmail?.toLowerCase() === 'clydelean3@gmail.com';
         const fallbackProfile: UserProfile = {
           id: userId,
           email: userEmail || '',
-          full_name: (userEmail || '').split('@')[0] || 'Auditor QA',
-          role: 'qa_auditor',
+          full_name: (userEmail || '').split('@')[0] || 'Usuario',
+          role: isSuperAdminEmail ? 'super_admin' : 'agent',
           campana: 'Claro Chile'
         };
         await supabase.from('profiles').upsert(fallbackProfile);
         return fallbackProfile;
       }
 
-      return data as UserProfile;
+      const prof = data as UserProfile;
+      // El creador/administrador principal siempre recibe rol super_admin
+      if (userEmail?.toLowerCase() === 'clydelean3@gmail.com' && prof.role !== 'super_admin') {
+        prof.role = 'super_admin';
+        supabase.from('profiles').update({ role: 'super_admin' }).eq('id', userId).then();
+      }
+
+      return prof;
     } catch (err) {
       console.error('[Auth] Error al obtener perfil:', err);
       return null;
@@ -122,17 +130,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     email: string,
     password: string,
     fullName: string,
-    role: UserRole = 'qa_auditor',
+    role: UserRole = 'agent',
     agentId?: string
   ) => {
     try {
+      const isSuperAdminEmail = email.toLowerCase().trim() === 'clydelean3@gmail.com';
+      const initialRole: UserRole = isSuperAdminEmail ? 'super_admin' : role;
+
       const { data, error } = await supabase.auth.signUp({
         email: email.trim(),
         password,
         options: {
           data: {
             full_name: fullName.trim(),
-            role,
+            role: initialRole,
             agent_id: agentId?.trim() || null,
             campana: 'Claro Chile'
           }
@@ -147,7 +158,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           id: data.user.id,
           email: data.user.email || email,
           full_name: fullName.trim(),
-          role,
+          role: initialRole,
           agent_id: agentId?.trim(),
           campana: 'Claro Chile'
         };

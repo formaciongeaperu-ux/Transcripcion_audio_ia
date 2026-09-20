@@ -8,9 +8,6 @@ import {
   CheckCircle2,
   AlertCircle,
   Loader2,
-  Users,
-  Award,
-  Headphones,
   KeyRound
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
@@ -24,8 +21,6 @@ export const AuthModal: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
-  const [role, setRole] = useState<UserRole>('qa_auditor');
-  const [agentId, setAgentId] = useState('');
 
   // Status
   const [loading, setLoading] = useState(false);
@@ -62,40 +57,23 @@ export const AuthModal: React.FC = () => {
           return;
         }
 
-        const res = await signUp(email, password, fullName, role, agentId);
+        // El rol por defecto para nuevos usuarios es 'agent' (el Administrador asigna roles en el panel de gestión)
+        const defaultRole: UserRole = 'agent';
+        const res = await signUp(email, password, fullName, defaultRole);
         if (res.error) {
-          setErrorMessage(res.error.message);
+          if (res.error.message.includes('Database error saving new user')) {
+            setErrorMessage('Error en Supabase: Ejecuta el script de actualización del trigger en el SQL Editor de Supabase (ver instrucciones en el chat).');
+          } else {
+            setErrorMessage(res.error.message);
+          }
         } else {
-          setSuccessMessage('¡Cuenta creada con éxito! Sesión iniciada.');
+          setSuccessMessage('¡Cuenta creada con éxito! Sesión iniciada como Asesor.');
         }
       }
     } catch (err: any) {
       setErrorMessage(err.message || 'Ocurrió un error inesperado.');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const roleDescriptions: Record<UserRole, { title: string; desc: string; icon: React.ComponentType<{ className?: string }> }> = {
-    super_admin: {
-      title: 'Super Administrador',
-      desc: 'Control total de la plataforma, calibraciones y reportes ejecutivos.',
-      icon: ShieldCheck
-    },
-    supervisor: {
-      title: 'Supervisor / Team Leader',
-      desc: 'Monitoreo de equipos, asignación de planes de acción OJT y coaching.',
-      icon: Users
-    },
-    qa_auditor: {
-      title: 'Auditor QA',
-      desc: 'Evaluación y calibración de llamadas con IA y rúbrica oficial.',
-      icon: Award
-    },
-    agent: {
-      title: 'Asesor / Ejecutivo',
-      desc: 'Visualización de evaluaciones propias y compromisos formativos.',
-      icon: Headphones
     }
   };
 
@@ -241,54 +219,16 @@ export const AuthModal: React.FC = () => {
             </div>
           </div>
 
-          {/* Selector de Rol si es registro */}
+          {/* Información sobre Rol */}
           {tab === 'register' && (
-            <div>
-              <label className="mb-1.5 block text-xs font-bold text-[#202124]">
-                Rol y Perfil Operativo
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                {(['qa_auditor', 'supervisor', 'super_admin', 'agent'] as UserRole[]).map((r) => {
-                  const info = roleDescriptions[r];
-                  const Icon = info.icon;
-                  const isSelected = role === r;
-                  return (
-                    <button
-                      type="button"
-                      key={r}
-                      onClick={() => setRole(r)}
-                      className={`flex flex-col items-start rounded-xl border p-2.5 text-left transition ${
-                        isSelected
-                          ? 'border-[#1A73E8] bg-[#E8F0FE] text-[#1A73E8] ring-1 ring-[#1A73E8]'
-                          : 'border-[#DADCE0] bg-white text-[#5F6368] hover:bg-[#F8F9FA]'
-                      }`}
-                    >
-                      <div className="flex items-center gap-1.5">
-                        <Icon className={`h-4 w-4 ${isSelected ? 'text-[#1A73E8]' : 'text-[#5F6368]'}`} />
-                        <span className="text-xs font-bold">{info.title}</span>
-                      </div>
-                      <span className="mt-1 text-[10px] leading-tight text-[#80868B]">
-                        {info.desc}
-                      </span>
-                    </button>
-                  );
-                })}
+            <div className="rounded-xl border border-[#DADCE0] bg-[#F8F9FA] p-3 text-xs text-[#5F6368]">
+              <div className="flex items-center gap-2 font-bold text-[#202124]">
+                <ShieldCheck className="h-4 w-4 text-[#1A73E8]" />
+                <span>Asignación de Roles por Administrador</span>
               </div>
-
-              {role === 'agent' && (
-                <div className="mt-2.5">
-                  <label className="mb-1 block text-xs font-medium text-[#5F6368]">
-                    ID de Asesor Oficial (opcional)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Ej: AG-4091"
-                    value={agentId}
-                    onChange={(e) => setAgentId(e.target.value)}
-                    className="w-full rounded-xl border border-[#DADCE0] bg-white py-1.5 px-3 text-xs text-[#202124] focus:border-[#1A73E8] focus:outline-hidden focus:ring-1 focus:ring-[#1A73E8]"
-                  />
-                </div>
-              )}
+              <p className="mt-1 text-[11px] leading-relaxed text-[#5F6368]">
+                Las cuentas nuevas se registran con perfil inicial de <strong>Asesor</strong>. El Administrador asignará los roles de <strong>Supervisor</strong> o <strong>Auditor QA</strong> desde el panel de gestión.
+              </p>
             </div>
           )}
 

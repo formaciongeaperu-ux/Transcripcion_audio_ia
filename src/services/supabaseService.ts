@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase';
-import { CallRecord } from '../types';
+import { CallRecord, UserProfile, UserRole } from '../types';
 
 /**
  * Normaliza y mapea un registro proveniente de Supabase a la interfaz CallRecord
@@ -207,6 +207,69 @@ export async function deleteCallRecordFromSupabase(id: string): Promise<{ succes
       .from('call_records')
       .delete()
       .eq('id', id);
+
+    if (error) {
+      return { success: false, error: new Error(error.message) };
+    }
+
+    return { success: true, error: null };
+  } catch (err: any) {
+    return { success: false, error: err };
+  }
+}
+
+/**
+ * Obtiene todos los perfiles de usuarios registrados desde Supabase
+ */
+export async function fetchAllProfiles(): Promise<{ data: UserProfile[]; error: Error | null }> {
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      return { data: [], error: new Error(error.message) };
+    }
+
+    const profiles: UserProfile[] = (data || []).map((row: any) => ({
+      id: row.id,
+      email: row.email,
+      full_name: row.full_name || '',
+      role: row.role as UserRole,
+      agent_id: row.agent_id || '',
+      campana: row.campana || '',
+      avatar_url: row.avatar_url || '',
+      created_at: row.created_at
+    }));
+
+    return { data: profiles, error: null };
+  } catch (err: any) {
+    return { data: [], error: err };
+  }
+}
+
+/**
+ * Actualiza el rol o datos de un usuario en Supabase (Solo Super Administrador o Supervisor)
+ */
+export async function updateUserProfileRole(
+  userId: string,
+  newRole: UserRole,
+  extras?: { agent_id?: string; campana?: string; full_name?: string }
+): Promise<{ success: boolean; error: Error | null }> {
+  try {
+    const payload: Record<string, any> = {
+      role: newRole,
+      updated_at: new Date().toISOString()
+    };
+    if (extras?.agent_id !== undefined) payload.agent_id = extras.agent_id;
+    if (extras?.campana !== undefined) payload.campana = extras.campana;
+    if (extras?.full_name !== undefined) payload.full_name = extras.full_name;
+
+    const { error } = await supabase
+      .from('profiles')
+      .update(payload)
+      .eq('id', userId);
 
     if (error) {
       return { success: false, error: new Error(error.message) };
