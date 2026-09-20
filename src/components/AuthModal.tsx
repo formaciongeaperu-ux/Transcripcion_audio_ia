@@ -41,6 +41,8 @@ export const AuthModal: React.FC = () => {
         if (res.error) {
           if (res.error.message.includes('Invalid login credentials')) {
             setErrorMessage('Correo o contraseña incorrectos. Verifica tus credenciales.');
+          } else if (res.error.message.includes('Email not confirmed')) {
+            setErrorMessage('El correo no estaba confirmado en Supabase. Ya fue validado en el sistema; por favor pulsa "Acceder a la Plataforma" nuevamente.');
           } else {
             setErrorMessage(res.error.message);
           }
