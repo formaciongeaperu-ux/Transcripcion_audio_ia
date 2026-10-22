@@ -1109,7 +1109,16 @@ function publicMessage(err) {
   const token = process.env.BLOB_READ_WRITE_TOKEN || "";
   let message = err instanceof Error ? err.message : "No se pudo analizar el audio";
   if (token) message = message.split(token).join("[token]");
-  return message.replace(/Bearer\s+\S+/gi, "Bearer [token]").replace(/https:\/\/\S*blob\.vercel-storage\.com\S*/gi, "https://blob.vercel-storage.com/[audio]").slice(0, 500);
+  message = message.replace(/Bearer\s+\S+/gi, "Bearer [token]").replace(/https:\/\/\S*blob\.vercel-storage\.com\S*/gi, "https://blob.vercel-storage.com/[audio]");
+  try {
+    const parsed = JSON.parse(message);
+    if (parsed?.error?.message) message = parsed.error.message;
+  } catch {
+  }
+  if (/high demand|UNAVAILABLE|currently experiencing|overloaded/i.test(message)) {
+    return "Gemini est\xE1 saturado en este momento. Espera un minuto y vuelve a iniciar la auditor\xEDa.";
+  }
+  return message.slice(0, 500);
 }
 function assertBlobUrl(value) {
   let parsed;

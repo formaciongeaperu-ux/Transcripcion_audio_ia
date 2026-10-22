@@ -58,8 +58,17 @@ async function postJson(url: string, payload: unknown): Promise<AnalyzeCallResul
   return { ok: response.ok, status: response.status, data };
 }
 
-async function transcribeSpan(blobUrl: string, start: number, length: number, depth = 0): Promise<TranscriptSegment[]> {
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function transcribeSpan(blobUrl: string, start: number, length: number, depth = 0, attempt = 0): Promise<TranscriptSegment[]> {
   const result = await postJson('/api/long-audio', { action: 'transcribe', blobUrl, start, length });
+  const busy = result.status === 502 || result.status === 503 || result.data.errorType === 'MODEL_ERROR';
+  if (busy && attempt < 2 && result.data.errorType !== 'SPLIT_REQUIRED') {
+    await sleep(3000 * (attempt + 1));
+    return transcribeSpan(blobUrl, start, length, depth, attempt + 1);
+  }
   const shouldSplit = result.data.errorType === 'SPLIT_REQUIRED'
     || result.data.errorType === 'TIMEOUT'
     || result.status === 504;

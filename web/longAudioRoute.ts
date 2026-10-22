@@ -50,10 +50,19 @@ function publicMessage(err: unknown): string {
   const token = process.env.BLOB_READ_WRITE_TOKEN || '';
   let message = err instanceof Error ? err.message : 'No se pudo analizar el audio';
   if (token) message = message.split(token).join('[token]');
-  return message
+  message = message
     .replace(/Bearer\s+\S+/gi, 'Bearer [token]')
-    .replace(/https:\/\/\S*blob\.vercel-storage\.com\S*/gi, 'https://blob.vercel-storage.com/[audio]')
-    .slice(0, 500);
+    .replace(/https:\/\/\S*blob\.vercel-storage\.com\S*/gi, 'https://blob.vercel-storage.com/[audio]');
+  try {
+    const parsed = JSON.parse(message) as { error?: { message?: string } };
+    if (parsed?.error?.message) message = parsed.error.message;
+  } catch {
+    // The provider sometimes returns plain text.
+  }
+  if (/high demand|UNAVAILABLE|currently experiencing|overloaded/i.test(message)) {
+    return 'Gemini está saturado en este momento. Espera un minuto y vuelve a iniciar la auditoría.';
+  }
+  return message.slice(0, 500);
 }
 
 function assertBlobUrl(value: unknown): string {
