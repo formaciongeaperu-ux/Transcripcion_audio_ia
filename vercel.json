@@ -2,11 +2,16 @@
   "version": 2,
   "framework": "vite",
   "outputDirectory": "dist",
+  "buildCommand": "npm run build",
   "functions": {
     "api/**/*.ts": {
       "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/**/*.js": {
+      "maxDuration": 60,
       "memory": 1024,
-      "includeFiles": "node_modules/ffmpeg-static/**"
+      "includeFiles": "vendor/ffmpeg"
     }
   },
   "rewrites": [

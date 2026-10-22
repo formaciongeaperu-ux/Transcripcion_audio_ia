@@ -59,10 +59,17 @@ function resolveFfmpeg() {
   if (process.env.FFMPEG_PATH && fs.existsSync(process.env.FFMPEG_PATH)) {
     return markExecutable(process.env.FFMPEG_PATH);
   }
-  const roots = [process.cwd(), path.dirname(process.argv[1] || "")].filter(Boolean);
+  const functionDir = path.dirname(process.argv[1] || "");
+  const roots = [process.cwd(), functionDir, path.resolve(functionDir, ".."), "/var/task"].filter(Boolean);
+  const relative = [
+    ["vendor", "ffmpeg"],
+    ["vendor", "ffmpeg.exe"],
+    ["node_modules", "ffmpeg-static", "ffmpeg"],
+    ["node_modules", "ffmpeg-static", "ffmpeg.exe"]
+  ];
   for (const root of roots) {
-    for (const name of ["ffmpeg", "ffmpeg.exe"]) {
-      const candidate = path.join(root, "node_modules", "ffmpeg-static", name);
+    for (const parts of relative) {
+      const candidate = path.join(root, ...parts);
       if (fs.existsSync(candidate)) return markExecutable(candidate);
     }
     const packageJson = path.join(root, "package.json");

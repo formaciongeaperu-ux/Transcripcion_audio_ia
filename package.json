@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && esbuild web/longAudioRoute.ts --bundle --platform=node --format=esm --packages=external --outfile=api/long-audio.js && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "postinstall": "node scripts/copy-ffmpeg.mjs",
+    "build": "node scripts/copy-ffmpeg.mjs && vite build && esbuild web/longAudioRoute.ts --bundle --platform=node --format=esm --packages=external --outfile=api/long-audio.js && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",

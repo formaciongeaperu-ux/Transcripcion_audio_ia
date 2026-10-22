@@ -386,6 +386,11 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                       <FileAudio className="h-5 w-5 shrink-0 text-[#1A73E8]" />
                       <div className="overflow-hidden">
                         <div className="truncate font-bold text-[#202124]">{it.file.name}</div>
+                        {it.errorMessage && (
+                          <div className="mt-0.5 max-w-[340px] text-[10px] leading-snug text-[#EA4335]">
+                            {it.errorMessage}
+                          </div>
+                        )}
                         <div className="text-[10px] text-[#5F6368]">
                           Original: {formatBytes(it.originalSize)}
                           {it.optimizedSize && (
