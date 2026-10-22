@@ -14,10 +14,20 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { Type } from "@google/genai";
-var TRANSCRIBE_MODEL = "gemini-3.1-flash-lite";
-var TRANSCRIBE_FALLBACK = "gemini-3.8-flash";
-var AUDIT_MODEL = "gemini-3.8-flash";
-var AUDIT_FALLBACK = "gemini-3.1-flash-lite";
+var TRANSCRIBE_MODELS = [
+  "gemini-3.1-flash-lite",
+  "gemini-3.5-flash",
+  "gemini-3.6-flash",
+  "gemini-flash-latest",
+  "gemini-3.8-flash"
+];
+var AUDIT_MODELS = [
+  "gemini-3.8-flash",
+  "gemini-3.6-flash",
+  "gemini-3.5-flash",
+  "gemini-flash-latest",
+  "gemini-3.1-flash-lite"
+];
 var MAX_INLINE_BYTES = 12 * 1024 * 1024;
 var MODEL_TIMEOUT_MS = 18e4;
 var AnalysisError = class extends Error {
@@ -302,6 +312,10 @@ async function generateJson(ai, model, parts, schema, systemInstruction, maxOutp
         }
         const thinkingRejected = /thinking/i.test(message) && Boolean(config.thinkingConfig);
         if (thinkingRejected) break;
+        const busy = status === 503 || /high demand|UNAVAILABLE|overloaded|currently experiencing/i.test(message);
+        if (busy) {
+          throw new AnalysisError("Gemini est\xE1 saturado en este modelo. Se intenta con otro.", 503, "MODEL_BUSY");
+        }
         const is429 = status === 429 || /429|quota|Too Many Requests/i.test(message);
         if (is429 && attempt < maxAttempts) {
           await sleep(Math.pow(2, attempt) * 1e3);
@@ -430,7 +444,7 @@ async function transcribeWindow(ai, audioPart, start, length, usage, limits) {
   const prompt = `Transcribe LITERALMENTE este tramo de la llamada.
 El tramo dura ${Math.round(length)} segundos y corresponde al intervalo ${formatStamp(start)} \u2013 ${formatStamp(start + length)} de la grabaci\xF3n completa.
 Devuelve todos los turnos de este tramo, en orden, sin omitir palabras. Los tiempos inicio y fin son relativos a este tramo.`;
-  const models = [TRANSCRIBE_MODEL, TRANSCRIBE_FALLBACK];
+  const models = TRANSCRIBE_MODELS;
   let lastError;
   for (const model of models) {
     try {
@@ -451,6 +465,9 @@ Devuelve todos los turnos de este tramo, en orden, sin omitir palabras. Los tiem
       lastError = err;
       if (err instanceof AnalysisError && (err.errorType === "TRUNCATED" || err.status === 401 || err.status === 429)) throw err;
     }
+  }
+  if (lastError instanceof AnalysisError && lastError.errorType === "MODEL_BUSY") {
+    throw new AnalysisError("Gemini est\xE1 saturado en este momento. Espera un minuto y vuelve a iniciar la auditor\xEDa.", 503, "MODEL_BUSY");
   }
   throw lastError instanceof Error ? lastError : new AnalysisError("No se pudo transcribir un tramo del audio");
 }
@@ -523,7 +540,7 @@ Eval\xFAa las 4 fases, el tNPS, los silencios, los quiebres y el coaching.
 TRANSCRIPCI\xD3N COMPLETA:
 ${transcript}`;
   let lastAuditError;
-  for (const model of [AUDIT_MODEL, AUDIT_FALLBACK]) {
+  for (const model of AUDIT_MODELS) {
     try {
       const result = await generateJson(
         options.ai,
@@ -537,11 +554,14 @@ ${transcript}`;
         { timeoutMs: 42e3, maxAttempts: 1 }
       );
       const audit = result.json && typeof result.json === "object" ? result.json : {};
-      return { audit, modelUsed: `${TRANSCRIBE_MODEL} + ${model}` };
+      return { audit, modelUsed: `${TRANSCRIBE_MODELS[0]} + ${model}` };
     } catch (err) {
       lastAuditError = err;
       if (err instanceof AnalysisError && (err.errorType === "TIMEOUT" || err.status === 401 || err.status === 429)) throw err;
     }
+  }
+  if (lastAuditError instanceof AnalysisError && lastAuditError.errorType === "MODEL_BUSY") {
+    throw new AnalysisError("Gemini est\xE1 saturado en este momento. Espera un minuto y vuelve a iniciar la auditor\xEDa.", 503, "MODEL_BUSY");
   }
   throw lastAuditError instanceof Error ? lastAuditError : new AnalysisError("No se pudo auditar la transcripci\xF3n completa");
 }

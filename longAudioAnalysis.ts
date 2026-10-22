@@ -5,10 +5,20 @@ import os from 'os';
 import path from 'path';
 import { GoogleGenAI, Type, type File } from '@google/genai';
 
-const TRANSCRIBE_MODEL = 'gemini-3.1-flash-lite';
-const TRANSCRIBE_FALLBACK = 'gemini-3.8-flash';
-const AUDIT_MODEL = 'gemini-3.8-flash';
-const AUDIT_FALLBACK = 'gemini-3.1-flash-lite';
+const TRANSCRIBE_MODELS = [
+  'gemini-3.1-flash-lite',
+  'gemini-3.5-flash',
+  'gemini-3.6-flash',
+  'gemini-flash-latest',
+  'gemini-3.8-flash',
+];
+const AUDIT_MODELS = [
+  'gemini-3.8-flash',
+  'gemini-3.6-flash',
+  'gemini-3.5-flash',
+  'gemini-flash-latest',
+  'gemini-3.1-flash-lite',
+];
 
 const OVERLAP_SEC = 20;
 const WINDOW_SEC = 600;
@@ -381,6 +391,10 @@ async function generateJson(
         }
         const thinkingRejected = /thinking/i.test(message) && Boolean(config.thinkingConfig);
         if (thinkingRejected) break;
+        const busy = status === 503 || /high demand|UNAVAILABLE|overloaded|currently experiencing/i.test(message);
+        if (busy) {
+          throw new AnalysisError('Gemini está saturado en este modelo. Se intenta con otro.', 503, 'MODEL_BUSY');
+        }
         const is429 = status === 429 || /429|quota|Too Many Requests/i.test(message);
         if (is429 && attempt < maxAttempts) {
           await sleep(Math.pow(2, attempt) * 1000);
@@ -534,7 +548,7 @@ async function transcribeWindow(
 El tramo dura ${Math.round(length)} segundos y corresponde al intervalo ${formatStamp(start)} – ${formatStamp(start + length)} de la grabación completa.
 Devuelve todos los turnos de este tramo, en orden, sin omitir palabras. Los tiempos inicio y fin son relativos a este tramo.`;
 
-  const models = [TRANSCRIBE_MODEL, TRANSCRIBE_FALLBACK];
+  const models = TRANSCRIBE_MODELS;
   let lastError: unknown;
   for (const model of models) {
     try {
@@ -555,6 +569,9 @@ Devuelve todos los turnos de este tramo, en orden, sin omitir palabras. Los tiem
       lastError = err;
       if (err instanceof AnalysisError && (err.errorType === 'TRUNCATED' || err.status === 401 || err.status === 429)) throw err;
     }
+  }
+  if (lastError instanceof AnalysisError && lastError.errorType === 'MODEL_BUSY') {
+    throw new AnalysisError('Gemini está saturado en este momento. Espera un minuto y vuelve a iniciar la auditoría.', 503, 'MODEL_BUSY');
   }
   throw lastError instanceof Error ? lastError : new AnalysisError('No se pudo transcribir un tramo del audio');
 }
@@ -646,9 +663,9 @@ TRANSCRIPCIÓN COMPLETA:
 ${transcript}`;
 
     let audit: Record<string, unknown> | null = null;
-    let auditModel = AUDIT_MODEL;
+    let auditModel = AUDIT_MODELS[0];
     let lastAuditError: unknown;
-    for (const model of [AUDIT_MODEL, AUDIT_FALLBACK]) {
+    for (const model of AUDIT_MODELS) {
       try {
         const result = await generateJson(
           options.ai,
@@ -679,7 +696,7 @@ ${transcript}`;
       audit,
       segmentos,
       durationSeconds,
-      modelUsed: `${TRANSCRIBE_MODEL} + ${auditModel}`,
+      modelUsed: `${TRANSCRIBE_MODELS[0]} + ${auditModel}`,
       windows: starts.length,
       usage,
     };
@@ -775,7 +792,7 @@ TRANSCRIPCIÓN COMPLETA:
 ${transcript}`;
 
   let lastAuditError: unknown;
-  for (const model of [AUDIT_MODEL, AUDIT_FALLBACK]) {
+  for (const model of AUDIT_MODELS) {
     try {
       const result = await generateJson(
         options.ai,
@@ -789,11 +806,14 @@ ${transcript}`;
         { timeoutMs: 42_000, maxAttempts: 1 }
       );
       const audit = (result.json && typeof result.json === 'object' ? result.json : {}) as Record<string, unknown>;
-      return { audit, modelUsed: `${TRANSCRIBE_MODEL} + ${model}` };
+      return { audit, modelUsed: `${TRANSCRIBE_MODELS[0]} + ${model}` };
     } catch (err) {
       lastAuditError = err;
       if (err instanceof AnalysisError && (err.errorType === 'TIMEOUT' || err.status === 401 || err.status === 429)) throw err;
     }
+  }
+  if (lastAuditError instanceof AnalysisError && lastAuditError.errorType === 'MODEL_BUSY') {
+    throw new AnalysisError('Gemini está saturado en este momento. Espera un minuto y vuelve a iniciar la auditoría.', 503, 'MODEL_BUSY');
   }
   throw lastAuditError instanceof Error
     ? lastAuditError
