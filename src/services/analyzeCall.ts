@@ -62,6 +62,15 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function auditNeedsRetry(result: AnalyzeCallResult): boolean {
+  if (result.ok && result.data.success) return false;
+  if (result.status === 401 || result.status === 429) return false;
+  const kind = result.data.errorType;
+  if (kind === 'API_KEY_INVALID' || kind === 'QUOTA_EXHAUSTED_ALL_MODELS' || kind === 'EMPTY_TRANSCRIPT') return false;
+  return result.status === 502 || result.status === 503 || result.status === 504
+    || kind === 'MODEL_BUSY' || kind === 'MODEL_ERROR' || kind === 'TIMEOUT';
+}
+
 async function transcribeSpan(blobUrl: string, start: number, length: number, depth = 0, attempt = 0): Promise<TranscriptSegment[]> {
   const result = await postJson('/api/long-audio', { action: 'transcribe', blobUrl, start, length });
   const busy = result.status === 502 || result.status === 503 || result.data.errorType === 'MODEL_ERROR';
@@ -128,8 +137,9 @@ async function analyzeOnWeb(
       queue: meta.queue,
     };
     let audit = await postJson('/api/long-audio', auditPayload);
-    if (!audit.ok && (audit.status === 504 || audit.data.errorType === 'TIMEOUT')) {
-      onProgress?.(95, 'Reintentando la auditoría');
+    for (let attempt = 1; attempt <= 5 && auditNeedsRetry(audit); attempt++) {
+      onProgress?.(93, `La transcripción ya está. Reintentando la auditoría (${attempt} de 5)`);
+      await sleep(10000 * attempt);
       audit = await postJson('/api/long-audio', auditPayload);
     }
     return audit;
