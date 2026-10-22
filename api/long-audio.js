@@ -5,7 +5,7 @@ import path3 from "path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { GoogleGenAI as GoogleGenAI2 } from "@google/genai";
-import { del, get, issueSignedToken, presignUrl } from "@vercel/blob";
+import { del, issueSignedToken, presignUrl } from "@vercel/blob";
 
 // longAudioAnalysis.ts
 import { execFile } from "child_process";
@@ -19,7 +19,8 @@ var TRANSCRIBE_MODELS = [
   "gemini-3.5-flash",
   "gemini-3.6-flash",
   "gemini-flash-latest",
-  "gemini-3.8-flash"
+  "gemini-3.8-flash",
+  "gemini-2.5-flash"
 ];
 var AUDIT_MODELS = [
   "gemini-3.8-flash",
@@ -92,9 +93,13 @@ function resolveFfmpeg() {
   }
   return "ffmpeg";
 }
-function runCmd(bin, args, timeoutMs = 12e4) {
+function runCmd(bin, args, timeoutMs = 12e4, signal) {
   return new Promise((resolve, reject) => {
-    execFile(bin, args, { timeout: timeoutMs, killSignal: "SIGKILL", maxBuffer: 20 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
+    if (signal?.aborted) {
+      reject(new AnalysisError("El tramo tard\xF3 demasiado para transcribirlo de una vez", 422, "SPLIT_REQUIRED"));
+      return;
+    }
+    execFile(bin, args, { timeout: timeoutMs, killSignal: "SIGKILL", signal, maxBuffer: 20 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
       if (err) {
         const wrapped = err;
         wrapped.stderr = stderr;
@@ -144,7 +149,7 @@ function ffmpegInputArgs(start, length, input, headers) {
   args.push("-i", input);
   return args;
 }
-async function extractWithCodec(ffmpeg, input, start, length, outputBase, encoder, headers, timeoutMs = 12e4) {
+async function extractWithCodec(ffmpeg, input, start, length, outputBase, encoder, headers, timeoutMs = 12e4, signal) {
   const inputArgs = ffmpegInputArgs(start, length, input, headers);
   if (encoder === "mp3") {
     const filePath2 = `${outputBase}.mp3`;
@@ -160,7 +165,7 @@ async function extractWithCodec(ffmpeg, input, start, length, outputBase, encode
       "-b:a",
       "32k",
       filePath2
-    ], timeoutMs);
+    ], timeoutMs, signal);
     return { filePath: filePath2, mimeType: "audio/mpeg" };
   }
   if (encoder === "aac") {
@@ -177,7 +182,7 @@ async function extractWithCodec(ffmpeg, input, start, length, outputBase, encode
       "-b:a",
       "32k",
       filePath2
-    ], timeoutMs);
+    ], timeoutMs, signal);
     return { filePath: filePath2, mimeType: "audio/m4a" };
   }
   const filePath = `${outputBase}.wav`;
@@ -191,18 +196,25 @@ async function extractWithCodec(ffmpeg, input, start, length, outputBase, encode
     "-c:a",
     "pcm_s16le",
     filePath
-  ], timeoutMs);
+  ], timeoutMs, signal);
   return { filePath, mimeType: "audio/wav" };
 }
-async function extractWindow(ffmpeg, input, start, length, outputBase, encoder, headers, timeoutMs = 12e4) {
+async function extractWindow(ffmpeg, input, start, length, outputBase, encoder, headers, timeoutMs = 12e4, signal) {
+  if (signal?.aborted) {
+    throw new AnalysisError("El tramo tard\xF3 demasiado para transcribirlo de una vez", 422, "SPLIT_REQUIRED");
+  }
   const order = encoder === "wav" ? ["wav"] : encoder === "aac" ? ["aac", "wav"] : ["mp3", "aac", "wav"];
   let lastError;
   for (const codec of order) {
     try {
-      return await extractWithCodec(ffmpeg, input, start, length, outputBase, codec, headers, timeoutMs);
+      return await extractWithCodec(ffmpeg, input, start, length, outputBase, codec, headers, timeoutMs, signal);
     } catch (err) {
       lastError = err;
+      if (signal?.aborted) break;
     }
+  }
+  if (lastError instanceof AnalysisError && (lastError.errorType === "SPLIT_REQUIRED" || lastError.errorType === "FFMPEG_MISSING")) {
+    throw lastError;
   }
   const error = lastError;
   throw new AnalysisError(error?.message || "No se pudo recortar el audio en tramos", 500, "FFMPEG_SPLIT_FAILED");
@@ -228,22 +240,18 @@ function sleep(ms) {
 async function generateJson(ai, model, parts, schema, systemInstruction, maxOutputTokens, temperature, acceptTruncated = false, limits) {
   const timeoutMs = limits?.timeoutMs ?? MODEL_TIMEOUT_MS;
   const maxAttempts = limits?.maxAttempts ?? 3;
+  const shared = {
+    systemInstruction,
+    temperature,
+    maxOutputTokens,
+    responseMimeType: "application/json",
+    responseSchema: schema,
+    abortSignal: limits?.abortSignal,
+    httpOptions: { timeout: timeoutMs }
+  };
   const configs = [
-    {
-      systemInstruction,
-      temperature,
-      maxOutputTokens,
-      responseMimeType: "application/json",
-      responseSchema: schema,
-      thinkingConfig: { thinkingLevel: "MINIMAL" }
-    },
-    {
-      systemInstruction,
-      temperature,
-      maxOutputTokens,
-      responseMimeType: "application/json",
-      responseSchema: schema
-    }
+    { ...shared, thinkingConfig: { thinkingLevel: "MINIMAL" } },
+    shared
   ];
   let lastError;
   for (const config of configs) {
@@ -288,6 +296,9 @@ async function generateJson(ai, model, parts, schema, systemInstruction, maxOutp
       } catch (err) {
         clearTimeout(timer);
         lastError = err;
+        if (limits?.abortSignal?.aborted || err.name === "AbortError") {
+          throw new AnalysisError("El tramo tard\xF3 demasiado para transcribirlo de una vez", 422, "SPLIT_REQUIRED");
+        }
         if (err instanceof AnalysisError && (err.errorType === "TRUNCATED" || err.errorType === "TIMEOUT" || err.status === 401)) throw err;
         const error2 = err;
         const message = error2.message || String(err);
@@ -451,12 +462,14 @@ Devuelve todos los turnos de este tramo, en orden, sin omitir palabras. Los tiem
       addUsage(usage, result.usage);
       return asSegments(result.json, start, length);
     } catch (err) {
-      lastError = err;
+      const message = err instanceof Error ? err.message : String(err);
+      const notFound = /not found|NOT_FOUND|is not supported|\b404\b/i.test(message);
+      if (!notFound) lastError = err;
       if (err instanceof AnalysisError && err.errorType === "TIMEOUT") {
         throw new AnalysisError("El tramo tard\xF3 demasiado para transcribirlo de una vez", 422, "SPLIT_REQUIRED");
       }
-      if (err instanceof AnalysisError && err.errorType === "MODEL_BUSY") continue;
-      if (err instanceof AnalysisError && (err.errorType === "TRUNCATED" || err.status === 401 || err.status === 429)) throw err;
+      if (notFound || err instanceof AnalysisError && err.errorType === "MODEL_BUSY") continue;
+      if (err instanceof AnalysisError && (err.errorType === "TRUNCATED" || err.errorType === "SPLIT_REQUIRED" || err.status === 401 || err.status === 429)) throw err;
     }
   }
   if (lastError instanceof AnalysisError && lastError.errorType === "MODEL_BUSY") {
@@ -464,7 +477,7 @@ Devuelve todos los turnos de este tramo, en orden, sin omitir palabras. Los tiem
   }
   throw lastError instanceof Error ? lastError : new AnalysisError("No se pudo transcribir un tramo del audio");
 }
-var WEB_WINDOW_SEC = 150;
+var WEB_WINDOW_SEC = 80;
 var WEB_OVERLAP_SEC = 12;
 function planWindows(duration, windowSec = WEB_WINDOW_SEC, overlapSec = WEB_OVERLAP_SEC) {
   const safeDuration = Math.max(1, duration);
@@ -491,7 +504,7 @@ async function transcribeSourceWindow(options) {
   const workDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "gea-win-"));
   const usage = emptyUsage();
   const remoteNames = [];
-  const limits = { timeoutMs: 32e3, maxAttempts: 1 };
+  const limits = { timeoutMs: 2e4, maxAttempts: 1, abortSignal: options.signal };
   try {
     const extracted = await extractWindow(
       ffmpeg,
@@ -501,7 +514,8 @@ async function transcribeSourceWindow(options) {
       path.join(workDir, "win"),
       "mp3",
       options.headers,
-      12e3
+      8e3,
+      options.signal
     );
     try {
       const audioPart = await audioPartForFile(options.ai, extracted.filePath, extracted.mimeType, remoteNames);
@@ -512,7 +526,7 @@ async function transcribeSourceWindow(options) {
       });
     }
   } catch (err) {
-    if (err instanceof AnalysisError && err.errorType === "TRUNCATED") {
+    if (options.signal?.aborted || err instanceof AnalysisError && (err.errorType === "TRUNCATED" || err.errorType === "SPLIT_REQUIRED")) {
       throw new AnalysisError("El tramo es demasiado largo para transcribirlo de una vez", 422, "SPLIT_REQUIRED");
     }
     throw err;
@@ -1167,38 +1181,45 @@ function getAI() {
   }
   return new GoogleGenAI2({ apiKey: key });
 }
-function isMediaFailure(err) {
-  return err instanceof AnalysisError && (err.errorType === "FFMPEG_SPLIT_FAILED" || err.errorType === "DURATION_UNREADABLE" || err.errorType === "FFMPEG_MISSING");
-}
-async function materializeBlob(url) {
-  const result = await get(url, { access: "private" });
-  if (!result || result.statusCode !== 200 || !result.stream) {
-    throw new AnalysisError("No se pudo leer el audio subido", 502, "BLOB_READ_FAILED");
-  }
+var sourceCache = /* @__PURE__ */ new Map();
+async function materializeBlob(url, signal) {
   const dest = path3.join(os2.tmpdir(), `gea-src-${Date.now()}-${Math.random().toString(36).slice(2)}.bin`);
-  const webStream = result.stream;
-  await pipeline(Readable.fromWeb(webStream), fs3.createWriteStream(dest));
-  return dest;
+  try {
+    const response = await fetch(await readableAudioUrl(url), { signal });
+    if (!response.ok || !response.body) {
+      throw new AnalysisError("No se pudo leer el audio subido", 502, "BLOB_READ_FAILED");
+    }
+    const webStream = response.body;
+    await pipeline(Readable.fromWeb(webStream), fs3.createWriteStream(dest), { signal });
+    return dest;
+  } catch (err) {
+    fs3.promises.unlink(dest).catch(() => {
+    });
+    if (signal?.aborted) {
+      throw new AnalysisError("El tramo tard\xF3 demasiado para transcribirlo de una vez", 422, "SPLIT_REQUIRED");
+    }
+    throw err;
+  }
+}
+function cachedSource(blobUrl, signal) {
+  const existing = sourceCache.get(blobUrl);
+  if (existing) return existing;
+  const created = materializeBlob(blobUrl, signal).catch((err) => {
+    sourceCache.delete(blobUrl);
+    throw err;
+  });
+  sourceCache.set(blobUrl, created);
+  return created;
 }
 async function planCall(blobUrl) {
-  try {
-    const durationSeconds = await probeSourceDuration(await readableAudioUrl(blobUrl));
-    return { success: true, durationSeconds, windows: planWindows(durationSeconds) };
-  } catch (err) {
-    if (!isMediaFailure(err) && err instanceof AnalysisError) throw err;
-    const local = await materializeBlob(blobUrl);
-    try {
-      const durationSeconds = await probeSourceDuration(local);
-      return { success: true, durationSeconds, windows: planWindows(durationSeconds) };
-    } finally {
-      fs3.promises.unlink(local).catch(() => {
-      });
-    }
-  }
+  const local = await cachedSource(blobUrl);
+  const durationSeconds = await probeSourceDuration(local);
+  return { success: true, durationSeconds, windows: planWindows(durationSeconds) };
 }
-function splitIfSlow(work, ms) {
+function withDeadline(work, ms, onTimeout) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
+      onTimeout();
       reject(new AnalysisError("El tramo tard\xF3 demasiado para transcribirlo de una vez", 422, "SPLIT_REQUIRED"));
     }, ms);
     work.then(
@@ -1220,17 +1241,18 @@ async function transcribeCall(blobUrl, start, length) {
   if (length > 200) {
     throw new AnalysisError("El tramo es demasiado largo para transcribirlo de una vez", 422, "SPLIT_REQUIRED");
   }
-  return splitIfSlow((async () => {
-    const ai = getAI();
-    const local = await materializeBlob(blobUrl);
-    try {
-      const segments = await transcribeSourceWindow({ ai, source: local, start, length });
-      return { success: true, segments };
-    } finally {
-      fs3.promises.unlink(local).catch(() => {
-      });
-    }
-  })(), 45e3);
+  const abort = new AbortController();
+  return withDeadline((async () => {
+    const local = await cachedSource(blobUrl, abort.signal);
+    const segments = await transcribeSourceWindow({
+      ai: getAI(),
+      source: local,
+      start,
+      length,
+      signal: abort.signal
+    });
+    return { success: true, segments };
+  })(), 34e3, () => abort.abort());
 }
 async function auditCall(body) {
   const groups = Array.isArray(body.groups) ? body.groups : [];
@@ -1275,6 +1297,13 @@ ${AUDIT_INSTRUCTION}`,
   };
 }
 async function cleanupCall(blobUrl) {
+  const pending = sourceCache.get(blobUrl);
+  sourceCache.delete(blobUrl);
+  if (pending) {
+    const local = await pending.catch(() => "");
+    if (local) fs3.promises.unlink(local).catch(() => {
+    });
+  }
   await del(blobUrl).catch(() => void 0);
   return { success: true };
 }

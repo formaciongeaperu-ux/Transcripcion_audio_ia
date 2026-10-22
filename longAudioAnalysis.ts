@@ -11,6 +11,7 @@ const TRANSCRIBE_MODELS = [
   'gemini-3.6-flash',
   'gemini-flash-latest',
   'gemini-3.8-flash',
+  'gemini-2.5-flash',
 ];
 const AUDIT_MODELS = [
   'gemini-3.8-flash',
@@ -131,9 +132,13 @@ function resolveFfmpeg(): string {
   return 'ffmpeg';
 }
 
-function runCmd(bin: string, args: string[], timeoutMs = 120_000): Promise<{ stdout: string; stderr: string }> {
+function runCmd(bin: string, args: string[], timeoutMs = 120_000, signal?: AbortSignal): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    execFile(bin, args, { timeout: timeoutMs, killSignal: 'SIGKILL', maxBuffer: 20 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
+    if (signal?.aborted) {
+      reject(new AnalysisError('El tramo tardó demasiado para transcribirlo de una vez', 422, 'SPLIT_REQUIRED'));
+      return;
+    }
+    execFile(bin, args, { timeout: timeoutMs, killSignal: 'SIGKILL', signal, maxBuffer: 20 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
       if (err) {
         const wrapped = err as NodeJS.ErrnoException & { stderr?: string };
         wrapped.stderr = stderr;
@@ -217,7 +222,8 @@ async function extractWithCodec(
   outputBase: string,
   encoder: 'mp3' | 'aac' | 'wav',
   headers?: string,
-  timeoutMs = 120_000
+  timeoutMs = 120_000,
+  signal?: AbortSignal
 ): Promise<{ filePath: string; mimeType: string }> {
   const inputArgs = ffmpegInputArgs(start, length, input, headers);
   if (encoder === 'mp3') {
@@ -225,7 +231,7 @@ async function extractWithCodec(
     await runCmd(ffmpeg, [
       ...inputArgs,
       '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'libmp3lame', '-b:a', '32k', filePath,
-    ], timeoutMs);
+    ], timeoutMs, signal);
     return { filePath, mimeType: 'audio/mpeg' };
   }
   if (encoder === 'aac') {
@@ -233,14 +239,14 @@ async function extractWithCodec(
     await runCmd(ffmpeg, [
       ...inputArgs,
       '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'aac', '-b:a', '32k', filePath,
-    ], timeoutMs);
+    ], timeoutMs, signal);
     return { filePath, mimeType: 'audio/m4a' };
   }
   const filePath = `${outputBase}.wav`;
   await runCmd(ffmpeg, [
     ...inputArgs,
-    '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', filePath,
-  ], timeoutMs);
+      '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', filePath,
+  ], timeoutMs, signal);
   return { filePath, mimeType: 'audio/wav' };
 }
 
@@ -252,8 +258,12 @@ async function extractWindow(
   outputBase: string,
   encoder: 'mp3' | 'aac' | 'wav',
   headers?: string,
-  timeoutMs = 120_000
+  timeoutMs = 120_000,
+  signal?: AbortSignal
 ): Promise<{ filePath: string; mimeType: string }> {
+  if (signal?.aborted) {
+    throw new AnalysisError('El tramo tardó demasiado para transcribirlo de una vez', 422, 'SPLIT_REQUIRED');
+  }
   const order: Array<'mp3' | 'aac' | 'wav'> = encoder === 'wav'
     ? ['wav']
     : encoder === 'aac'
@@ -262,10 +272,14 @@ async function extractWindow(
   let lastError: unknown;
   for (const codec of order) {
     try {
-      return await extractWithCodec(ffmpeg, input, start, length, outputBase, codec, headers, timeoutMs);
+      return await extractWithCodec(ffmpeg, input, start, length, outputBase, codec, headers, timeoutMs, signal);
     } catch (err) {
       lastError = err;
+      if (signal?.aborted) break;
     }
+  }
+  if (lastError instanceof AnalysisError && (lastError.errorType === 'SPLIT_REQUIRED' || lastError.errorType === 'FFMPEG_MISSING')) {
+    throw lastError;
   }
   const error = lastError as { message?: string };
   throw new AnalysisError(error?.message || 'No se pudo recortar el audio en tramos', 500, 'FFMPEG_SPLIT_FAILED');
@@ -308,26 +322,22 @@ async function generateJson(
   maxOutputTokens: number,
   temperature: number,
   acceptTruncated = false,
-  limits?: { timeoutMs?: number; maxAttempts?: number }
+  limits?: { timeoutMs?: number; maxAttempts?: number; abortSignal?: AbortSignal }
 ): Promise<GenerateJsonResult> {
   const timeoutMs = limits?.timeoutMs ?? MODEL_TIMEOUT_MS;
   const maxAttempts = limits?.maxAttempts ?? 3;
+  const shared = {
+    systemInstruction,
+    temperature,
+    maxOutputTokens,
+    responseMimeType: 'application/json',
+    responseSchema: schema,
+    abortSignal: limits?.abortSignal,
+    httpOptions: { timeout: timeoutMs },
+  };
   const configs: Array<Record<string, unknown>> = [
-    {
-      systemInstruction,
-      temperature,
-      maxOutputTokens,
-      responseMimeType: 'application/json',
-      responseSchema: schema,
-      thinkingConfig: { thinkingLevel: 'MINIMAL' },
-    },
-    {
-      systemInstruction,
-      temperature,
-      maxOutputTokens,
-      responseMimeType: 'application/json',
-      responseSchema: schema,
-    },
+    { ...shared, thinkingConfig: { thinkingLevel: 'MINIMAL' } },
+    shared,
   ];
 
   let lastError: unknown;
@@ -378,6 +388,9 @@ async function generateJson(
       } catch (err) {
         clearTimeout(timer);
         lastError = err;
+        if (limits?.abortSignal?.aborted || (err as { name?: string }).name === 'AbortError') {
+          throw new AnalysisError('El tramo tardó demasiado para transcribirlo de una vez', 422, 'SPLIT_REQUIRED');
+        }
         if (err instanceof AnalysisError && (err.errorType === 'TRUNCATED' || err.errorType === 'TIMEOUT' || err.status === 401)) throw err;
         const error = err as { status?: number; message?: string };
         const message = error.message || String(err);
@@ -542,7 +555,7 @@ async function transcribeWindow(
   start: number,
   length: number,
   usage: Usage,
-  limits?: { timeoutMs?: number; maxAttempts?: number }
+  limits?: { timeoutMs?: number; maxAttempts?: number; abortSignal?: AbortSignal }
 ): Promise<WindowSegment[]> {
   const prompt = `Transcribe LITERALMENTE este tramo de la llamada.
 El tramo dura ${Math.round(length)} segundos y corresponde al intervalo ${formatStamp(start)} – ${formatStamp(start + length)} de la grabación completa.
@@ -566,12 +579,14 @@ Devuelve todos los turnos de este tramo, en orden, sin omitir palabras. Los tiem
       addUsage(usage, result.usage);
       return asSegments(result.json, start, length);
     } catch (err) {
-      lastError = err;
+      const message = err instanceof Error ? err.message : String(err);
+      const notFound = /not found|NOT_FOUND|is not supported|\b404\b/i.test(message);
+      if (!notFound) lastError = err;
       if (err instanceof AnalysisError && err.errorType === 'TIMEOUT') {
         throw new AnalysisError('El tramo tardó demasiado para transcribirlo de una vez', 422, 'SPLIT_REQUIRED');
       }
-      if (err instanceof AnalysisError && err.errorType === 'MODEL_BUSY') continue;
-      if (err instanceof AnalysisError && (err.errorType === 'TRUNCATED' || err.status === 401 || err.status === 429)) throw err;
+      if (notFound || (err instanceof AnalysisError && err.errorType === 'MODEL_BUSY')) continue;
+      if (err instanceof AnalysisError && (err.errorType === 'TRUNCATED' || err.errorType === 'SPLIT_REQUIRED' || err.status === 401 || err.status === 429)) throw err;
     }
   }
   if (lastError instanceof AnalysisError && lastError.errorType === 'MODEL_BUSY') {
@@ -710,7 +725,7 @@ ${transcript}`;
   }
 }
 
-export const WEB_WINDOW_SEC = 150;
+export const WEB_WINDOW_SEC = 80;
 export const WEB_OVERLAP_SEC = 12;
 
 export function planWindows(duration: number, windowSec = WEB_WINDOW_SEC, overlapSec = WEB_OVERLAP_SEC) {
@@ -741,12 +756,13 @@ export async function transcribeSourceWindow(options: {
   start: number;
   length: number;
   headers?: string;
+  signal?: AbortSignal;
 }): Promise<TranscriptSegment[]> {
   const ffmpeg = resolveFfmpeg();
   const workDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'gea-win-'));
   const usage = emptyUsage();
   const remoteNames: string[] = [];
-  const limits = { timeoutMs: 32_000, maxAttempts: 1 };
+  const limits = { timeoutMs: 20_000, maxAttempts: 1, abortSignal: options.signal };
   try {
     const extracted = await extractWindow(
       ffmpeg,
@@ -756,7 +772,8 @@ export async function transcribeSourceWindow(options: {
       path.join(workDir, 'win'),
       'mp3',
       options.headers,
-      12_000
+      8_000,
+      options.signal
     );
     try {
       const audioPart = await audioPartForFile(options.ai, extracted.filePath, extracted.mimeType, remoteNames);
@@ -766,7 +783,7 @@ export async function transcribeSourceWindow(options: {
       fs.promises.unlink(extracted.filePath).catch(() => {});
     }
   } catch (err) {
-    if (err instanceof AnalysisError && err.errorType === 'TRUNCATED') {
+    if (options.signal?.aborted || (err instanceof AnalysisError && (err.errorType === 'TRUNCATED' || err.errorType === 'SPLIT_REQUIRED'))) {
       throw new AnalysisError('El tramo es demasiado largo para transcribirlo de una vez', 422, 'SPLIT_REQUIRED');
     }
     throw err;

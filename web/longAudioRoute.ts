@@ -4,7 +4,7 @@ import path from 'path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { GoogleGenAI } from '@google/genai';
-import { del, get, issueSignedToken, presignUrl } from '@vercel/blob';
+import { del, issueSignedToken, presignUrl } from '@vercel/blob';
 import {
   AnalysisError,
   auditTranscript,
@@ -103,44 +103,48 @@ function getAI(): GoogleGenAI {
   return new GoogleGenAI({ apiKey: key });
 }
 
-function isMediaFailure(err: unknown): boolean {
-  return err instanceof AnalysisError && (
-    err.errorType === 'FFMPEG_SPLIT_FAILED'
-    || err.errorType === 'DURATION_UNREADABLE'
-    || err.errorType === 'FFMPEG_MISSING'
-  );
+const sourceCache = new Map<string, Promise<string>>();
+
+async function materializeBlob(url: string, signal?: AbortSignal): Promise<string> {
+  const dest = path.join(os.tmpdir(), `gea-src-${Date.now()}-${Math.random().toString(36).slice(2)}.bin`);
+  try {
+    const response = await fetch(await readableAudioUrl(url), { signal });
+    if (!response.ok || !response.body) {
+      throw new AnalysisError('No se pudo leer el audio subido', 502, 'BLOB_READ_FAILED');
+    }
+    const webStream = response.body as unknown as import('node:stream/web').ReadableStream;
+    await pipeline(Readable.fromWeb(webStream), fs.createWriteStream(dest), { signal });
+    return dest;
+  } catch (err) {
+    fs.promises.unlink(dest).catch(() => {});
+    if (signal?.aborted) {
+      throw new AnalysisError('El tramo tardó demasiado para transcribirlo de una vez', 422, 'SPLIT_REQUIRED');
+    }
+    throw err;
+  }
 }
 
-async function materializeBlob(url: string): Promise<string> {
-  const result = await get(url, { access: 'private' });
-  if (!result || result.statusCode !== 200 || !result.stream) {
-    throw new AnalysisError('No se pudo leer el audio subido', 502, 'BLOB_READ_FAILED');
-  }
-  const dest = path.join(os.tmpdir(), `gea-src-${Date.now()}-${Math.random().toString(36).slice(2)}.bin`);
-  const webStream = result.stream as unknown as import('node:stream/web').ReadableStream;
-  await pipeline(Readable.fromWeb(webStream), fs.createWriteStream(dest));
-  return dest;
+function cachedSource(blobUrl: string, signal?: AbortSignal): Promise<string> {
+  const existing = sourceCache.get(blobUrl);
+  if (existing) return existing;
+  const created = materializeBlob(blobUrl, signal).catch((err) => {
+    sourceCache.delete(blobUrl);
+    throw err;
+  });
+  sourceCache.set(blobUrl, created);
+  return created;
 }
 
 async function planCall(blobUrl: string) {
-  try {
-    const durationSeconds = await probeSourceDuration(await readableAudioUrl(blobUrl));
-    return { success: true, durationSeconds, windows: planWindows(durationSeconds) };
-  } catch (err) {
-    if (!isMediaFailure(err) && err instanceof AnalysisError) throw err;
-    const local = await materializeBlob(blobUrl);
-    try {
-      const durationSeconds = await probeSourceDuration(local);
-      return { success: true, durationSeconds, windows: planWindows(durationSeconds) };
-    } finally {
-      fs.promises.unlink(local).catch(() => {});
-    }
-  }
+  const local = await cachedSource(blobUrl);
+  const durationSeconds = await probeSourceDuration(local);
+  return { success: true, durationSeconds, windows: planWindows(durationSeconds) };
 }
 
-function splitIfSlow<T>(work: Promise<T>, ms: number): Promise<T> {
+function withDeadline<T>(work: Promise<T>, ms: number, onTimeout: () => void): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
+      onTimeout();
       reject(new AnalysisError('El tramo tardó demasiado para transcribirlo de una vez', 422, 'SPLIT_REQUIRED'));
     }, ms);
     work.then(
@@ -163,16 +167,18 @@ async function transcribeCall(blobUrl: string, start: number, length: number) {
   if (length > 200) {
     throw new AnalysisError('El tramo es demasiado largo para transcribirlo de una vez', 422, 'SPLIT_REQUIRED');
   }
-  return splitIfSlow((async () => {
-    const ai = getAI();
-    const local = await materializeBlob(blobUrl);
-    try {
-      const segments = await transcribeSourceWindow({ ai, source: local, start, length });
-      return { success: true, segments };
-    } finally {
-      fs.promises.unlink(local).catch(() => {});
-    }
-  })(), 45_000);
+  const abort = new AbortController();
+  return withDeadline((async () => {
+    const local = await cachedSource(blobUrl, abort.signal);
+    const segments = await transcribeSourceWindow({
+      ai: getAI(),
+      source: local,
+      start,
+      length,
+      signal: abort.signal,
+    });
+    return { success: true, segments };
+  })(), 34_000, () => abort.abort());
 }
 
 async function auditCall(body: any) {
@@ -217,6 +223,12 @@ async function auditCall(body: any) {
 }
 
 async function cleanupCall(blobUrl: string) {
+  const pending = sourceCache.get(blobUrl);
+  sourceCache.delete(blobUrl);
+  if (pending) {
+    const local = await pending.catch(() => '');
+    if (local) fs.promises.unlink(local).catch(() => {});
+  }
   await del(blobUrl).catch(() => undefined);
   return { success: true };
 }

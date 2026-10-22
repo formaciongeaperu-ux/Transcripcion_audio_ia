@@ -71,15 +71,30 @@ function auditNeedsRetry(result: AnalyzeCallResult): boolean {
     || kind === 'MODEL_BUSY' || kind === 'MODEL_ERROR' || kind === 'TIMEOUT';
 }
 
-async function transcribeSpan(blobUrl: string, start: number, length: number, depth = 0, attempt = 0): Promise<TranscriptSegment[]> {
+const BUSY_WAITS_MS = [12_000, 18_000, 24_000, 30_000, 40_000, 50_000, 60_000, 60_000];
+
+function geminiBusy(result: AnalyzeCallResult): boolean {
+  if (result.status === 401 || result.status === 429) return false;
+  if (result.status === 503 || result.data.errorType === 'MODEL_BUSY') return true;
+  return /saturado|high demand|UNAVAILABLE/i.test(result.data.message || '');
+}
+
+async function transcribeSpan(
+  blobUrl: string,
+  start: number,
+  length: number,
+  depth = 0,
+  attempt = 0,
+  onWait?: (detail: string) => void
+): Promise<TranscriptSegment[]> {
   let result: AnalyzeCallResult;
   try {
     result = await postJson('/api/long-audio', { action: 'transcribe', blobUrl, start, length });
   } catch {
     if (length > 20 && depth < 6) {
       const half = length / 2;
-      const left = await transcribeSpan(blobUrl, start, half, depth + 1);
-      const right = await transcribeSpan(blobUrl, start + half, length - half, depth + 1);
+      const left = await transcribeSpan(blobUrl, start, half, depth + 1, 0, onWait);
+      const right = await transcribeSpan(blobUrl, start + half, length - half, depth + 1, 0, onWait);
       return [...left, ...right];
     }
     throw new Error('Se cortó la conexión al transcribir un tramo. Vuelve a iniciar la auditoría.');
@@ -89,14 +104,14 @@ async function transcribeSpan(blobUrl: string, start: number, length: number, de
     || result.status === 504;
   if (shouldSplit && length > 20 && depth < 6) {
     const half = length / 2;
-    const left = await transcribeSpan(blobUrl, start, half, depth + 1);
-    const right = await transcribeSpan(blobUrl, start + half, length - half, depth + 1);
+    const left = await transcribeSpan(blobUrl, start, half, depth + 1, 0, onWait);
+    const right = await transcribeSpan(blobUrl, start + half, length - half, depth + 1, 0, onWait);
     return [...left, ...right];
   }
-  const busy = result.status === 503 || result.data.errorType === 'MODEL_BUSY';
-  if (busy && attempt < 2) {
-    await sleep(8000 * (attempt + 1));
-    return transcribeSpan(blobUrl, start, length, depth, attempt + 1);
+  if (geminiBusy(result) && attempt < BUSY_WAITS_MS.length) {
+    onWait?.(`Gemini ocupado, reintento ${attempt + 1} de ${BUSY_WAITS_MS.length}`);
+    await sleep(BUSY_WAITS_MS[attempt]);
+    return transcribeSpan(blobUrl, start, length, depth, attempt + 1, onWait);
   }
   if (!result.ok || !result.data.success) {
     const error = new Error(result.data.message || 'No se pudo transcribir un tramo del audio');
@@ -134,7 +149,9 @@ async function analyzeOnWeb(
       const window = windows[index];
       const progress = 14 + Math.round((index / Math.max(1, windows.length)) * 74);
       onProgress?.(progress, `Tramo ${index + 1} de ${windows.length}`);
-      groups.push(await transcribeSpan(blob.url, window.start, window.length));
+      groups.push(await transcribeSpan(blob.url, window.start, window.length, 0, 0, (detail) => {
+        onProgress?.(progress, detail);
+      }));
     }
 
     onProgress?.(92, 'Auditando la llamada');
