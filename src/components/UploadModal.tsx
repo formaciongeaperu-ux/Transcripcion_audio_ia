@@ -8,14 +8,13 @@ import {
   Loader2, 
   Sliders, 
   Trash2, 
-  Zap,
   ArrowRight,
   ShieldCheck,
   RefreshCw
 } from 'lucide-react';
 import { CallRecord, UploadItem } from '../types';
-import { downsampleTo16kHzMonoWav } from '../utils/audioOptimizer';
 import { normalizeAudioForPlayback } from '../utils/telephonyAudio';
+import { analyzeUploadedCall } from '../services/analyzeCall';
 
 interface UploadModalProps {
   isOpen: boolean;
@@ -31,8 +30,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   onAddToDeferredQueue,
 }) => {
   const [items, setItems] = useState<UploadItem[]>([]);
-  const [concurrency, setConcurrency] = useState<number>(3);
-  const [optimizeAudio, setOptimizeAudio] = useState<boolean>(true);
+  const [concurrency, setConcurrency] = useState<number>(1);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [overallProgress, setOverallProgress] = useState<number>(0);
   const [agentName, setAgentName] = useState('Camila Navarro V.');
@@ -102,63 +100,26 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     const activeWorkers: Promise<void>[] = [];
 
     const processSingleItem = async (item: UploadItem) => {
-      // 1. Optimize audio step
       setItems((prev) =>
-        prev.map((it) => (it.id === item.id ? { ...it, status: 'optimizing', progress: 20 } : it))
+        prev.map((it) => (it.id === item.id ? { ...it, status: 'processing', progress: 30 } : it))
       );
 
-      let processedBase64 = '';
-      let optimizedSize = item.originalSize;
-
       try {
-        if (optimizeAudio) {
-          const optResult = await downsampleTo16kHzMonoWav(item.file);
-          processedBase64 = optResult.base64;
-          optimizedSize = optResult.optimizedSize;
-          setItems((prev) =>
-            prev.map((it) =>
-              it.id === item.id
-                ? {
-                    ...it,
-                    optimizedSize,
-                    progress: 50,
-                    status: 'processing',
-                  }
-                : it
-            )
-          );
-        } else {
-          // Convert file directly to base64
-          const arrayBuf = await item.file.arrayBuffer();
-          const bytes = new Uint8Array(arrayBuf);
-          let binary = '';
-          for (let i = 0; i < bytes.byteLength; i++) {
-            binary += String.fromCharCode(bytes[i]);
-          }
-          processedBase64 = btoa(binary);
-          setItems((prev) =>
-            prev.map((it) => (it.id === item.id ? { ...it, progress: 50, status: 'processing' } : it))
-          );
-        }
-
         const targetAgentId = item.agentId || agentId || 'AGT-4821';
         const targetAgentName = item.agentName || agentName || 'Asesor Claro';
 
-        // 2. Send to backend Gemini analysis API
-        const response = await fetch('/api/analyze-call', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            audioBase64: processedBase64,
-            mimeType: 'audio/wav',
-            fileName: item.file.name,
-            agentName: targetAgentName,
-            agentId: targetAgentId,
-            queue: queueName,
-          }),
+        const response = await analyzeUploadedCall(item.file, {
+          fileName: item.file.name,
+          agentName: targetAgentName,
+          agentId: targetAgentId,
+          queue: queueName,
+        }, (progress, detail) => {
+          setItems((prev) =>
+            prev.map((it) => (it.id === item.id ? { ...it, status: 'processing', progress, detail } : it))
+          );
         });
 
-        const resData = await response.json();
+        const resData = response.data;
 
         if (response.ok && resData.success && resData.data) {
           const callData = resData.data as CallRecord;
@@ -274,7 +235,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                 Carga Masiva de Grabaciones
               </h2>
               <p className="text-xs text-[#5F6368]">
-                Procesador con optimizador Web Audio 16kHz y control de concurrencia
+                En el sitio, el audio se sube completo y se transcribe por tramos sin recortar el diálogo
               </p>
             </div>
           </div>
@@ -310,27 +271,14 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                 className="w-full cursor-pointer accent-[#1A73E8]"
               />
               <span className="text-[10px] text-[#5F6368]">
-                Protege contra límites de cuota (TPM/RPM) en Gemini API.
+                Una llamada larga se procesa por tramos seguidos. Usa más de una solo con audios cortos.
               </span>
             </div>
 
-            {/* Audio Optimizer Switch */}
-            <div className="flex flex-col justify-between">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-[#202124]">
-                  <Zap className="h-4 w-4 text-[#FBBC05]" />
-                  <span>Optimizador en Navegador</span>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={optimizeAudio}
-                  disabled={isProcessing}
-                  onChange={(e) => setOptimizeAudio(e.target.checked)}
-                  className="h-4 w-4 rounded-sm border-[#DADCE0] text-[#1A73E8] focus:ring-[#1A73E8]"
-                />
-              </div>
-              <p className="mt-1 text-[10px] text-[#5F6368]">
-                Re-muestrea a 16kHz mono WAV vía Web Audio API antes del envío (Ahorro ~80% de ancho de banda).
+            <div className="flex flex-col justify-center rounded-xl border border-[#DADCE0] bg-white px-3 py-2">
+              <p className="text-xs font-bold text-[#202124]">Audios de más de 40 minutos</p>
+              <p className="mt-1 text-[10px] leading-relaxed text-[#5F6368]">
+                En la web cada tramo dura unos 2 minutos y medio. Una llamada de 40 minutos tarda varios minutos y conserva el diálogo completo.
               </p>
             </div>
           </div>
@@ -488,7 +436,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                       {it.status === 'processing' && (
                         <span className="flex items-center gap-1 rounded-full bg-[#E8F0FE] px-2 py-0.5 text-[10px] font-bold text-[#1A73E8]">
                           <Loader2 className="h-3 w-3 animate-spin" />
-                          <span>Gemini AI</span>
+                          <span>{it.detail || 'Transcribiendo'}</span>
                         </span>
                       )}
                       {it.status === 'completed' && (

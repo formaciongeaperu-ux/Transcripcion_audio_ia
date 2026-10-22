@@ -19,6 +19,7 @@ import { SpreadsheetInfo, appendCallsToSpreadsheet } from './services/sheetsServ
 import { DriveFolderInfo, uploadAudioToDrive } from './services/driveService';
 import { getAccessToken } from './services/googleAuth';
 import { fetchCallRecordsFromSupabase, saveCallRecordToSupabase, bulkSaveCallRecordsToSupabase } from './services/supabaseService';
+import { analyzeUploadedCall } from './services/analyzeCall';
 import { useAuth } from './contexts/AuthContext';
 
 export default function App() {
@@ -294,17 +295,14 @@ export default function App() {
   const handleRetryItem = async (item: UploadItem) => {
     setIsRetryingQueue(true);
     try {
-      const response = await fetch('/api/analyze-call', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fileName: item.file.name,
-          agentName: 'Asesor Claro',
-          queue: 'Exclusivo Postpago Chile',
-        }),
+      const response = await analyzeUploadedCall(item.file, {
+        fileName: item.file.name,
+        agentName: item.agentName || 'Asesor Claro',
+        agentId: item.agentId || '',
+        queue: 'Exclusivo Postpago Chile',
       });
-      const resData = await response.json();
-      if (resData.success && resData.data) {
+      const resData = response.data;
+      if (response.ok && resData.success && resData.data) {
         const newCall = resData.data as CallRecord;
         newCall.audio_url = URL.createObjectURL(item.file);
         newCall.audioFile = item.file;

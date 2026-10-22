@@ -215,6 +215,7 @@ export interface UploadItem {
   progress: number;
   status: 'pending' | 'optimizing' | 'processing' | 'completed' | 'deferred' | 'error';
   errorMessage?: string;
+  detail?: string;
   resultRecord?: CallRecord;
   agentId?: string;
   agentName?: string;
