@@ -73,19 +73,19 @@ function auditNeedsRetry(result: AnalyzeCallResult): boolean {
 
 async function transcribeSpan(blobUrl: string, start: number, length: number, depth = 0, attempt = 0): Promise<TranscriptSegment[]> {
   const result = await postJson('/api/long-audio', { action: 'transcribe', blobUrl, start, length });
-  const busy = result.status === 502 || result.status === 503 || result.data.errorType === 'MODEL_ERROR';
-  if (busy && attempt < 2 && result.data.errorType !== 'SPLIT_REQUIRED') {
-    await sleep(3000 * (attempt + 1));
-    return transcribeSpan(blobUrl, start, length, depth, attempt + 1);
-  }
   const shouldSplit = result.data.errorType === 'SPLIT_REQUIRED'
     || result.data.errorType === 'TIMEOUT'
     || result.status === 504;
-  if (shouldSplit && length > 40 && depth < 5) {
+  if (shouldSplit && length > 20 && depth < 6) {
     const half = length / 2;
     const left = await transcribeSpan(blobUrl, start, half, depth + 1);
     const right = await transcribeSpan(blobUrl, start + half, length - half, depth + 1);
     return [...left, ...right];
+  }
+  const busy = result.status === 503 || result.data.errorType === 'MODEL_BUSY';
+  if (busy && attempt < 2) {
+    await sleep(8000 * (attempt + 1));
+    return transcribeSpan(blobUrl, start, length, depth, attempt + 1);
   }
   if (!result.ok || !result.data.success) {
     const error = new Error(result.data.message || 'No se pudo transcribir un tramo del audio');

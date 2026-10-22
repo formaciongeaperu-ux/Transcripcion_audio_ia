@@ -567,6 +567,10 @@ Devuelve todos los turnos de este tramo, en orden, sin omitir palabras. Los tiem
       return asSegments(result.json, start, length);
     } catch (err) {
       lastError = err;
+      if (err instanceof AnalysisError && err.errorType === 'TIMEOUT') {
+        throw new AnalysisError('El tramo tardó demasiado para transcribirlo de una vez', 422, 'SPLIT_REQUIRED');
+      }
+      if (err instanceof AnalysisError && err.errorType === 'MODEL_BUSY') continue;
       if (err instanceof AnalysisError && (err.errorType === 'TRUNCATED' || err.status === 401 || err.status === 429)) throw err;
     }
   }
@@ -739,11 +743,10 @@ export async function transcribeSourceWindow(options: {
   headers?: string;
 }): Promise<TranscriptSegment[]> {
   const ffmpeg = resolveFfmpeg();
-  const encoder = await pickEncoder(ffmpeg);
   const workDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'gea-win-'));
   const usage = emptyUsage();
   const remoteNames: string[] = [];
-  const limits = { timeoutMs: 28_000, maxAttempts: 1 };
+  const limits = { timeoutMs: 32_000, maxAttempts: 1 };
   try {
     const extracted = await extractWindow(
       ffmpeg,
@@ -751,9 +754,9 @@ export async function transcribeSourceWindow(options: {
       options.start,
       options.length,
       path.join(workDir, 'win'),
-      encoder,
+      'mp3',
       options.headers,
-      18_000
+      12_000
     );
     try {
       const audioPart = await audioPartForFile(options.ai, extracted.filePath, extracted.mimeType, remoteNames);

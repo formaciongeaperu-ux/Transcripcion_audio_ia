@@ -138,17 +138,6 @@ ${stderr}`.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
   }
   return seconds;
 }
-async function pickEncoder(ffmpeg) {
-  try {
-    const { stdout, stderr } = await runCmd(ffmpeg, ["-hide_banner", "-encoders"], 3e4);
-    const text = `${stdout}
-${stderr}`;
-    if (/libmp3lame|\baac\b/.test(text) && /libmp3lame/.test(text)) return "mp3";
-    if (/\baac\b/.test(text)) return "aac";
-  } catch {
-  }
-  return "wav";
-}
 function ffmpegInputArgs(start, length, input, headers) {
   const args = ["-y", "-ss", String(start), "-t", String(length)];
   if (headers) args.push("-headers", headers);
@@ -463,6 +452,10 @@ Devuelve todos los turnos de este tramo, en orden, sin omitir palabras. Los tiem
       return asSegments(result.json, start, length);
     } catch (err) {
       lastError = err;
+      if (err instanceof AnalysisError && err.errorType === "TIMEOUT") {
+        throw new AnalysisError("El tramo tard\xF3 demasiado para transcribirlo de una vez", 422, "SPLIT_REQUIRED");
+      }
+      if (err instanceof AnalysisError && err.errorType === "MODEL_BUSY") continue;
       if (err instanceof AnalysisError && (err.errorType === "TRUNCATED" || err.status === 401 || err.status === 429)) throw err;
     }
   }
@@ -495,11 +488,10 @@ async function probeSourceDuration(source, headers) {
 }
 async function transcribeSourceWindow(options) {
   const ffmpeg = resolveFfmpeg();
-  const encoder = await pickEncoder(ffmpeg);
   const workDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "gea-win-"));
   const usage = emptyUsage();
   const remoteNames = [];
-  const limits = { timeoutMs: 28e3, maxAttempts: 1 };
+  const limits = { timeoutMs: 32e3, maxAttempts: 1 };
   try {
     const extracted = await extractWindow(
       ffmpeg,
@@ -507,9 +499,9 @@ async function transcribeSourceWindow(options) {
       options.start,
       options.length,
       path.join(workDir, "win"),
-      encoder,
+      "mp3",
       options.headers,
-      18e3
+      12e3
     );
     try {
       const audioPart = await audioPartForFile(options.ai, extracted.filePath, extracted.mimeType, remoteNames);
