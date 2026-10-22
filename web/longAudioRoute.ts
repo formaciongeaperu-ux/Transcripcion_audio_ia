@@ -138,6 +138,24 @@ async function planCall(blobUrl: string) {
   }
 }
 
+function splitIfSlow<T>(work: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new AnalysisError('El tramo tardó demasiado para transcribirlo de una vez', 422, 'SPLIT_REQUIRED'));
+    }, ms);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
 async function transcribeCall(blobUrl: string, start: number, length: number) {
   if (!Number.isFinite(start) || start < 0 || !Number.isFinite(length) || length <= 0) {
     throw new AnalysisError('El tramo pedido no es válido', 400, 'BAD_WINDOW');
@@ -145,17 +163,8 @@ async function transcribeCall(blobUrl: string, start: number, length: number) {
   if (length > 200) {
     throw new AnalysisError('El tramo es demasiado largo para transcribirlo de una vez', 422, 'SPLIT_REQUIRED');
   }
-  const ai = getAI();
-  try {
-    const segments = await transcribeSourceWindow({
-      ai,
-      source: await readableAudioUrl(blobUrl),
-      start,
-      length,
-    });
-    return { success: true, segments };
-  } catch (err) {
-    if (err instanceof AnalysisError && !isMediaFailure(err)) throw err;
+  return splitIfSlow((async () => {
+    const ai = getAI();
     const local = await materializeBlob(blobUrl);
     try {
       const segments = await transcribeSourceWindow({ ai, source: local, start, length });
@@ -163,7 +172,7 @@ async function transcribeCall(blobUrl: string, start: number, length: number) {
     } finally {
       fs.promises.unlink(local).catch(() => {});
     }
-  }
+  })(), 45_000);
 }
 
 async function auditCall(body: any) {

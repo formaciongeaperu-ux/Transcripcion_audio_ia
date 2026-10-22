@@ -94,7 +94,7 @@ function resolveFfmpeg() {
 }
 function runCmd(bin, args, timeoutMs = 12e4) {
   return new Promise((resolve, reject) => {
-    execFile(bin, args, { timeout: timeoutMs, maxBuffer: 20 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
+    execFile(bin, args, { timeout: timeoutMs, killSignal: "SIGKILL", maxBuffer: 20 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
       if (err) {
         const wrapped = err;
         wrapped.stderr = stderr;
@@ -1196,6 +1196,23 @@ async function planCall(blobUrl) {
     }
   }
 }
+function splitIfSlow(work, ms) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new AnalysisError("El tramo tard\xF3 demasiado para transcribirlo de una vez", 422, "SPLIT_REQUIRED"));
+    }, ms);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
 async function transcribeCall(blobUrl, start, length) {
   if (!Number.isFinite(start) || start < 0 || !Number.isFinite(length) || length <= 0) {
     throw new AnalysisError("El tramo pedido no es v\xE1lido", 400, "BAD_WINDOW");
@@ -1203,17 +1220,8 @@ async function transcribeCall(blobUrl, start, length) {
   if (length > 200) {
     throw new AnalysisError("El tramo es demasiado largo para transcribirlo de una vez", 422, "SPLIT_REQUIRED");
   }
-  const ai = getAI();
-  try {
-    const segments = await transcribeSourceWindow({
-      ai,
-      source: await readableAudioUrl(blobUrl),
-      start,
-      length
-    });
-    return { success: true, segments };
-  } catch (err) {
-    if (err instanceof AnalysisError && !isMediaFailure(err)) throw err;
+  return splitIfSlow((async () => {
+    const ai = getAI();
     const local = await materializeBlob(blobUrl);
     try {
       const segments = await transcribeSourceWindow({ ai, source: local, start, length });
@@ -1222,7 +1230,7 @@ async function transcribeCall(blobUrl, start, length) {
       fs3.promises.unlink(local).catch(() => {
       });
     }
-  }
+  })(), 45e3);
 }
 async function auditCall(body) {
   const groups = Array.isArray(body.groups) ? body.groups : [];

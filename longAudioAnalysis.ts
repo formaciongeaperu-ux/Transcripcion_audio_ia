@@ -133,7 +133,7 @@ function resolveFfmpeg(): string {
 
 function runCmd(bin: string, args: string[], timeoutMs = 120_000): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    execFile(bin, args, { timeout: timeoutMs, maxBuffer: 20 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
+    execFile(bin, args, { timeout: timeoutMs, killSignal: 'SIGKILL', maxBuffer: 20 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
       if (err) {
         const wrapped = err as NodeJS.ErrnoException & { stderr?: string };
         wrapped.stderr = stderr;

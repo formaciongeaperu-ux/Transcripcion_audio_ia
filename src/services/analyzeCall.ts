@@ -72,7 +72,18 @@ function auditNeedsRetry(result: AnalyzeCallResult): boolean {
 }
 
 async function transcribeSpan(blobUrl: string, start: number, length: number, depth = 0, attempt = 0): Promise<TranscriptSegment[]> {
-  const result = await postJson('/api/long-audio', { action: 'transcribe', blobUrl, start, length });
+  let result: AnalyzeCallResult;
+  try {
+    result = await postJson('/api/long-audio', { action: 'transcribe', blobUrl, start, length });
+  } catch {
+    if (length > 20 && depth < 6) {
+      const half = length / 2;
+      const left = await transcribeSpan(blobUrl, start, half, depth + 1);
+      const right = await transcribeSpan(blobUrl, start + half, length - half, depth + 1);
+      return [...left, ...right];
+    }
+    throw new Error('Se cortó la conexión al transcribir un tramo. Vuelve a iniciar la auditoría.');
+  }
   const shouldSplit = result.data.errorType === 'SPLIT_REQUIRED'
     || result.data.errorType === 'TIMEOUT'
     || result.status === 504;
