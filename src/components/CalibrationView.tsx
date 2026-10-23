@@ -201,8 +201,8 @@ export const CalibrationView: React.FC<CalibrationViewProps> = ({ onNotify, call
 
     const total = calls.length;
     const avg = Math.round(calls.reduce((acc: number, c: any) => acc + (c.qa_score_global || 0), 0) / total);
-    const promoters = calls.filter((c: any) => (c.pronostico_nps?.clasificacion || '').toUpperCase().includes('PROMOTOR')).length;
-    const detractors = calls.filter((c: any) => (c.pronostico_nps?.clasificacion || '').toUpperCase().includes('DETRACTOR')).length;
+    const promoters = calls.filter((c: any) => (c.nps_pronostico?.clasificacion || '').toUpperCase().includes('PROMOTOR')).length;
+    const detractors = calls.filter((c: any) => (c.nps_pronostico?.clasificacion || '').toUpperCase().includes('DETRACTOR')).length;
     const neutrals = total - promoters - detractors;
 
     const quiebresList: string[] = [];
@@ -224,7 +224,7 @@ export const CalibrationView: React.FC<CalibrationViewProps> = ({ onNotify, call
       detractorsPct: Math.round((detractors / total) * 100),
       topQuiebres: quiebresList.slice(0, 3).join('; ') || 'Pausas en sistemas Somos Clave, validación de RUT',
       commonDrivers: drivers.join(', ') || 'Consultas comerciales y reclamos de boleta',
-      ojtSummary: `${calls.filter((c: any) => c.diagnostico_ojt?.madurez === 'EN_REFUERZO').length} asesores en refuerzo, ${calls.filter((c: any) => c.diagnostico_ojt?.madurez === 'EN_DESARROLLO').length} en desarrollo`
+      ojtSummary: `${calls.filter((c: any) => c.diagnostico_ojt?.nivel_madurez === 'EN_REFUERZO').length} asesores en refuerzo, ${calls.filter((c: any) => c.diagnostico_ojt?.nivel_madurez === 'EN_DESARROLLO').length} en desarrollo`
     };
   }, [calls]);
 
@@ -286,26 +286,20 @@ export const CalibrationView: React.FC<CalibrationViewProps> = ({ onNotify, call
           sensitivitySettings: sensitivity
         })
       });
-      let result: any = null;
-      if (res.ok) {
-        const contentType = res.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-          result = await res.json();
-        }
-      }
-      if (result && result.success) {
-        setSaveBanner('¡Calibración guardada exitosamente! Todas las nuevas llamadas auditadas usarán estas directivas.');
+      const contentType = res.headers.get('content-type') || '';
+      const result = contentType.includes('application/json') ? await res.json() : null;
+      if (res.ok && result?.success) {
+        if (result.data) setCalibrationData(result.data);
+        setSaveBanner('Calibración guardada. Las próximas auditorías usarán estas directivas.');
         if (onNotify) onNotify('Calibración guardada en el motor de IA', 'success');
         setTimeout(() => setSaveBanner(null), 6000);
       } else {
-        setSaveBanner('¡Calibración guardada en sesión activa!');
-        if (onNotify) onNotify('Calibración guardada localmente', 'info');
-        setTimeout(() => setSaveBanner(null), 5000);
+        setSaveBanner(result?.error || 'No se pudo guardar la calibración.');
+        if (onNotify) onNotify('No se pudo guardar la calibración', 'error');
       }
     } catch {
-      setSaveBanner('¡Calibración guardada en sesión activa!');
-      if (onNotify) onNotify('Calibración guardada localmente', 'info');
-      setTimeout(() => setSaveBanner(null), 5000);
+      setSaveBanner('No se pudo guardar la calibración. Revisa la conexión e inténtalo de nuevo.');
+      if (onNotify) onNotify('No se pudo guardar la calibración', 'error');
     } finally {
       setIsSaving(false);
     }

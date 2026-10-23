@@ -1,4 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
+import { readRequestJson } from '../../calibrationStore.ts';
 
 function getApiKeys(): string[] {
   const keys: string[] = [];
@@ -136,7 +137,8 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const { message, history = [], customDirectives = '', ragContext } = req.body || {};
+    const body = await readRequestJson(req);
+    const { message, history = [], customDirectives = '', ragContext } = body || {};
 
     if (!message || typeof message !== 'string') {
       return res.status(400).json({ success: false, error: 'Mensaje requerido' });
@@ -277,7 +279,7 @@ De esta forma, la interfaz habilitará automáticamente un botón para incorpora
 
     let rawReply = '';
     let modelUsed = '';
-    const candidateModels = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash'];
+    const candidateModels = ['gemini-3.1-flash-lite', 'gemini-3.5-flash', 'gemini-2.5-flash'];
 
     for (const key of apiKeys) {
       try {

@@ -1,8 +1,8 @@
 // web/longAudioRoute.ts
-import fs3 from "fs";
-import os2 from "os";
-import path3 from "path";
-import { Readable } from "node:stream";
+import fs4 from "fs";
+import os3 from "os";
+import path4 from "path";
+import { Readable as Readable2 } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { GoogleGenAI as GoogleGenAI2 } from "@google/genai";
 import { del, issueSignedToken, presignUrl } from "@vercel/blob";
@@ -572,6 +572,14 @@ ${transcript}`;
   throw lastAuditError instanceof Error ? lastAuditError : new AnalysisError("No se pudo auditar la transcripci\xF3n completa");
 }
 
+// calibrationStore.ts
+import fs3 from "fs";
+import os2 from "os";
+import path3 from "path";
+import { Readable } from "node:stream";
+import { text as readStreamText } from "node:stream/consumers";
+import { get, put } from "@vercel/blob";
+
 // qaEngine.ts
 import fs2 from "fs";
 import path2 from "path";
@@ -727,16 +735,16 @@ function loadCalibration() {
   };
 }
 var activeCalibration = loadCalibration();
-function getActiveFullPrompt() {
+function getActiveFullPrompt(source = activeCalibration) {
   let prompt = DEFAULT_BASE_PROMPT;
-  if (activeCalibration.customDirectives && activeCalibration.customDirectives.trim()) {
+  if (source.customDirectives && source.customDirectives.trim()) {
     prompt += `
 
 --- DIRECTIVAS ADICIONALES DE CALIBRACI\xD3N ACTIVA (CONFIGURADAS POR EL AUDITOR) ---
-${activeCalibration.customDirectives.trim()}`;
+${source.customDirectives.trim()}`;
   }
-  if (activeCalibration.sensitivitySettings) {
-    const s = activeCalibration.sensitivitySettings;
+  if (source.sensitivitySettings) {
+    const s = source.sensitivitySettings;
     prompt += `
 
 --- PAR\xC1METROS OPERATIVOS DE SENSIBILIDAD DIN\xC1MICA ---
@@ -1103,6 +1111,62 @@ function finalizeCallAnalysis(parsed, ctx) {
   };
 }
 
+// calibrationStore.ts
+var BLOB_NAME = "gea-calibration.json";
+var TMP_FILE = path3.join(os2.tmpdir(), BLOB_NAME);
+function blobToken() {
+  const value = (process.env.BLOB_READ_WRITE_TOKEN || "").trim();
+  return value && value !== "[SENSITIVE]" ? value : "";
+}
+function defaultCalibration() {
+  return {
+    customDirectives: DEFAULT_CUSTOM_DIRECTIVES,
+    sensitivitySettings: { ...DEFAULT_SENSITIVITY_SETTINGS },
+    version: "v1.3.0",
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+function normalize(raw) {
+  const base = defaultCalibration();
+  const strictness = String(raw?.sensitivitySettings?.detractorStrictness || "");
+  const allowed = ["flexible", "equilibrada", "estricta", "moderado"];
+  const mapped = strictness === "moderado" ? "equilibrada" : strictness;
+  return {
+    customDirectives: typeof raw?.customDirectives === "string" ? raw.customDirectives : base.customDirectives,
+    sensitivitySettings: {
+      silenceToleranceSeconds: Number(raw?.sensitivitySettings?.silenceToleranceSeconds ?? base.sensitivitySettings.silenceToleranceSeconds) || 30,
+      detractorStrictness: allowed.includes(strictness) ? mapped : base.sensitivitySettings.detractorStrictness,
+      chileanSlangTolerance: Boolean(raw?.sensitivitySettings?.chileanSlangTolerance ?? base.sensitivitySettings.chileanSlangTolerance),
+      ojtPedagogicalFocus: Boolean(raw?.sensitivitySettings?.ojtPedagogicalFocus ?? base.sensitivitySettings.ojtPedagogicalFocus)
+    },
+    version: "v1.3.0",
+    updatedAt: typeof raw?.updatedAt === "string" ? raw.updatedAt : (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+async function readBlob() {
+  const token = blobToken();
+  if (!token) return null;
+  const result = await get(BLOB_NAME, { access: "private", token, useCache: false });
+  if (!result || !("stream" in result) || !result.stream) return null;
+  const raw = await readStreamText(Readable.fromWeb(result.stream));
+  return raw ? normalize(JSON.parse(raw)) : null;
+}
+async function readCalibration() {
+  try {
+    const stored = await readBlob();
+    if (stored) return stored;
+  } catch (err) {
+    console.warn("[Calibration] No se pudo leer la calibraci\xF3n guardada:", err);
+  }
+  for (const file of [TMP_FILE, path3.join(process.cwd(), "calibration.json")]) {
+    try {
+      if (fs3.existsSync(file)) return normalize(JSON.parse(fs3.readFileSync(file, "utf8")));
+    } catch {
+    }
+  }
+  return defaultCalibration();
+}
+
 // web/longAudioRoute.ts
 var AUDIT_INSTRUCTION = `INSTRUCCI\xD3N DE ESTA EJECUCI\xD3N:
 La transcripci\xF3n literal ya fue hecha por completo y viene en el mensaje del usuario.
@@ -1183,17 +1247,17 @@ function getAI() {
 }
 var sourceCache = /* @__PURE__ */ new Map();
 async function materializeBlob(url, signal) {
-  const dest = path3.join(os2.tmpdir(), `gea-src-${Date.now()}-${Math.random().toString(36).slice(2)}.bin`);
+  const dest = path4.join(os3.tmpdir(), `gea-src-${Date.now()}-${Math.random().toString(36).slice(2)}.bin`);
   try {
     const response = await fetch(await readableAudioUrl(url), { signal });
     if (!response.ok || !response.body) {
       throw new AnalysisError("No se pudo leer el audio subido", 502, "BLOB_READ_FAILED");
     }
     const webStream = response.body;
-    await pipeline(Readable.fromWeb(webStream), fs3.createWriteStream(dest), { signal });
+    await pipeline(Readable2.fromWeb(webStream), fs4.createWriteStream(dest), { signal });
     return dest;
   } catch (err) {
-    fs3.promises.unlink(dest).catch(() => {
+    fs4.promises.unlink(dest).catch(() => {
     });
     if (signal?.aborted) {
       throw new AnalysisError("El tramo tard\xF3 demasiado para transcribirlo de una vez", 422, "SPLIT_REQUIRED");
@@ -1265,13 +1329,14 @@ async function auditCall(body) {
   const agentId = String(body.agentId || "");
   const queue = String(body.queue || "General");
   const fileName = String(body.fileName || "grabacion.wav");
+  const calibration = await readCalibration();
   const { audit, modelUsed } = await auditTranscript({
     ai: getAI(),
     segmentos,
     durationSeconds,
     agentName,
     queue,
-    auditSystemPrompt: `${getActiveFullPrompt()}
+    auditSystemPrompt: `${getActiveFullPrompt(calibration)}
 
 ${AUDIT_INSTRUCTION}`,
     auditSchema: qaSchemaWithoutTranscript()
@@ -1301,7 +1366,7 @@ async function cleanupCall(blobUrl) {
   sourceCache.delete(blobUrl);
   if (pending) {
     const local = await pending.catch(() => "");
-    if (local) fs3.promises.unlink(local).catch(() => {
+    if (local) fs4.promises.unlink(local).catch(() => {
     });
   }
   await del(blobUrl).catch(() => void 0);

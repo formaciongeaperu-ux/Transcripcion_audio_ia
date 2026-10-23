@@ -14,6 +14,7 @@ import {
   transcribeSourceWindow,
   type TranscriptSegment,
 } from '../longAudioAnalysis.ts';
+import { readCalibration } from '../calibrationStore.ts';
 import { finalizeCallAnalysis, getActiveFullPrompt, qaSchemaWithoutTranscript } from '../qaEngine.ts';
 
 const AUDIT_INSTRUCTION = `INSTRUCCIÓN DE ESTA EJECUCIÓN:
@@ -192,13 +193,14 @@ async function auditCall(body: any) {
   const agentId = String(body.agentId || '');
   const queue = String(body.queue || 'General');
   const fileName = String(body.fileName || 'grabacion.wav');
+  const calibration = await readCalibration();
   const { audit, modelUsed } = await auditTranscript({
     ai: getAI(),
     segmentos,
     durationSeconds,
     agentName,
     queue,
-    auditSystemPrompt: `${getActiveFullPrompt()}\n\n${AUDIT_INSTRUCTION}`,
+    auditSystemPrompt: `${getActiveFullPrompt(calibration)}\n\n${AUDIT_INSTRUCTION}`,
     auditSchema: qaSchemaWithoutTranscript(),
   });
   const parsed = {

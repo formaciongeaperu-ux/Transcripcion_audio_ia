@@ -179,15 +179,18 @@ export function saveCalibration(customDirectives: string, sensitivitySettings: t
   }
 }
 
-export function getActiveFullPrompt(): string {
+export function getActiveFullPrompt(source: {
+  customDirectives?: string;
+  sensitivitySettings?: typeof DEFAULT_SENSITIVITY_SETTINGS;
+} = activeCalibration): string {
   let prompt = DEFAULT_BASE_PROMPT;
 
-  if (activeCalibration.customDirectives && activeCalibration.customDirectives.trim()) {
-    prompt += `\n\n--- DIRECTIVAS ADICIONALES DE CALIBRACIÓN ACTIVA (CONFIGURADAS POR EL AUDITOR) ---\n${activeCalibration.customDirectives.trim()}`;
+  if (source.customDirectives && source.customDirectives.trim()) {
+    prompt += `\n\n--- DIRECTIVAS ADICIONALES DE CALIBRACIÓN ACTIVA (CONFIGURADAS POR EL AUDITOR) ---\n${source.customDirectives.trim()}`;
   }
 
-  if (activeCalibration.sensitivitySettings) {
-    const s = activeCalibration.sensitivitySettings;
+  if (source.sensitivitySettings) {
+    const s = source.sensitivitySettings;
     prompt += `\n\n--- PARÁMETROS OPERATIVOS DE SENSIBILIDAD DINÁMICA ---
 - Tolerancia máxima a silencios/pausas operativas sin hold formal: ${s.silenceToleranceSeconds} segundos.
 - Rigor en clasificación de Detractores tNPS: ${s.detractorStrictness.toUpperCase()}.
