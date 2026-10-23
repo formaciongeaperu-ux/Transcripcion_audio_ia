@@ -87,6 +87,99 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     setItems([]);
   };
 
+  const processSingleItem = async (item: UploadItem): Promise<CallRecord | null> => {
+    setItems((prev) =>
+      prev.map((it) => (it.id === item.id ? { ...it, status: 'processing', progress: 30, errorMessage: undefined } : it))
+    );
+
+    try {
+      const targetAgentId = item.agentId || agentId || 'AGT-4821';
+      const targetAgentName = item.agentName || agentName || 'Asesor Claro';
+
+      const response = await analyzeUploadedCall(item.file, {
+        fileName: item.file.name,
+        agentName: targetAgentName,
+        agentId: targetAgentId,
+        queue: queueName,
+      }, (progress, detail) => {
+        setItems((prev) =>
+          prev.map((it) => (it.id === item.id ? { ...it, status: 'processing', progress, detail } : it))
+        );
+      });
+
+      const resData = response.data;
+
+      if (response.ok && resData.success && resData.data) {
+        const callData = resData.data as CallRecord;
+        let audioUrl = '';
+        try {
+          const norm = await normalizeAudioForPlayback(item.file);
+          audioUrl = URL.createObjectURL(norm.blob);
+        } catch {
+          audioUrl = URL.createObjectURL(item.file);
+        }
+        callData.audio_url = audioUrl;
+        callData.audioFile = item.file;
+        callData.file_name = item.file.name;
+        callData.agente_id = targetAgentId;
+        callData.agente_nombre = targetAgentName;
+
+        setItems((prev) =>
+          prev.map((it) =>
+            it.id === item.id
+              ? {
+                  ...it,
+                  status: 'completed',
+                  progress: 100,
+                  resultRecord: callData,
+                  errorMessage: undefined,
+                }
+              : it
+          )
+        );
+        return callData;
+      }
+
+      const is429 = response.status === 429 || resData.errorType === 'QUOTA_EXHAUSTED_ALL_MODELS';
+      const errorMsg = resData.message || 'Error en análisis';
+
+      if (is429) {
+        onAddToDeferredQueue({
+          ...item,
+          status: 'deferred',
+          errorMessage: errorMsg,
+        });
+      }
+
+      setItems((prev) =>
+        prev.map((it) =>
+          it.id === item.id
+            ? {
+                ...it,
+                status: is429 ? 'deferred' : 'error',
+                progress: 0,
+                errorMessage: errorMsg,
+              }
+            : it
+        )
+      );
+      return null;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setItems((prev) =>
+        prev.map((it) =>
+          it.id === item.id ? { ...it, status: 'error', errorMessage: msg } : it
+        )
+      );
+      return null;
+    }
+  };
+
+  const continueItem = async (item: UploadItem) => {
+    const call = await processSingleItem(item);
+    if (call) await onCallsProcessed([call]);
+  };
+
   // Process files with concurrency control
   const startProcessing = async () => {
     if (items.length === 0 || isProcessing) return;
@@ -99,99 +192,12 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     let currentIndex = 0;
     const activeWorkers: Promise<void>[] = [];
 
-    const processSingleItem = async (item: UploadItem) => {
-      setItems((prev) =>
-        prev.map((it) => (it.id === item.id ? { ...it, status: 'processing', progress: 30 } : it))
-      );
-
-      try {
-        const targetAgentId = item.agentId || agentId || 'AGT-4821';
-        const targetAgentName = item.agentName || agentName || 'Asesor Claro';
-
-        const response = await analyzeUploadedCall(item.file, {
-          fileName: item.file.name,
-          agentName: targetAgentName,
-          agentId: targetAgentId,
-          queue: queueName,
-        }, (progress, detail) => {
-          setItems((prev) =>
-            prev.map((it) => (it.id === item.id ? { ...it, status: 'processing', progress, detail } : it))
-          );
-        });
-
-        const resData = response.data;
-
-        if (response.ok && resData.success && resData.data) {
-          const callData = resData.data as CallRecord;
-          // Normalize telephony formats (G.711 A-law / µ-law) into playable PCM
-          let audioUrl = '';
-          try {
-            const norm = await normalizeAudioForPlayback(item.file);
-            audioUrl = URL.createObjectURL(norm.blob);
-          } catch {
-            audioUrl = URL.createObjectURL(item.file);
-          }
-          callData.audio_url = audioUrl;
-          callData.audioFile = item.file;
-          callData.file_name = item.file.name;
-          callData.agente_id = targetAgentId;
-          callData.agente_nombre = targetAgentName;
-          completedCalls.push(callData);
-
-          setItems((prev) =>
-            prev.map((it) =>
-              it.id === item.id
-                ? {
-                    ...it,
-                    status: 'completed',
-                    progress: 100,
-                    resultRecord: callData,
-                  }
-                : it
-            )
-          );
-        } else {
-          // Handle 429 quota exhaustion or API key issue
-          const is429 = response.status === 429 || resData.errorType === 'QUOTA_EXHAUSTED_ALL_MODELS';
-          const errorMsg = resData.message || 'Error en análisis';
-
-          if (is429) {
-            onAddToDeferredQueue({
-              ...item,
-              status: 'deferred',
-              errorMessage: errorMsg,
-            });
-          }
-
-          setItems((prev) =>
-            prev.map((it) =>
-              it.id === item.id
-                ? {
-                    ...it,
-                    status: is429 ? 'deferred' : 'error',
-                    progress: 0,
-                    errorMessage: errorMsg,
-                  }
-                : it
-            )
-          );
-        }
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        setItems((prev) =>
-          prev.map((it) =>
-            it.id === item.id ? { ...it, status: 'error', errorMessage: msg } : it
-          )
-        );
-      }
-    };
-
-    // Run pool
     const runWorker = async () => {
       while (currentIndex < pendingItems.length) {
         const item = pendingItems[currentIndex++];
         if (item.status === 'pending') {
-          await processSingleItem(item);
+          const call = await processSingleItem(item);
+          if (call) completedCalls.push(call);
         }
       }
     };
@@ -467,10 +473,21 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                         </span>
                       )}
                       {it.status === 'error' && (
-                        <span className="flex items-center gap-1 rounded-full bg-[#FCE8E6] px-2 py-0.5 text-[10px] font-bold text-[#EA4335]" title={it.errorMessage}>
-                          <AlertCircle className="h-3 w-3" />
-                          <span>Error</span>
-                        </span>
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => continueItem(it)}
+                            className="flex items-center gap-1 rounded-full bg-[#1A73E8] px-2 py-0.5 text-[10px] font-bold text-white"
+                            title="Retoma los tramos ya transcritos"
+                          >
+                            <RefreshCw className="h-3 w-3" />
+                            <span>Continuar</span>
+                          </button>
+                          <span className="flex items-center gap-1 rounded-full bg-[#FCE8E6] px-2 py-0.5 text-[10px] font-bold text-[#EA4335]" title={it.errorMessage}>
+                            <AlertCircle className="h-3 w-3" />
+                            <span>Error</span>
+                          </span>
+                        </>
                       )}
 
                       {!isProcessing && it.status === 'pending' && (

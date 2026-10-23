@@ -72,6 +72,62 @@ function auditNeedsRetry(result: AnalyzeCallResult): boolean {
 }
 
 const BUSY_WAITS_MS = [12_000, 18_000, 24_000, 30_000, 40_000, 50_000, 60_000, 60_000];
+const MIN_SPAN_SEC = 8;
+const MAX_SPLIT_DEPTH = 8;
+const PROGRESS_KEY = 'gea_transcript_progress_v1';
+
+interface SavedProgress {
+  blobUrl: string;
+  durationSeconds: number;
+  windows: AudioWindow[];
+  groups: TranscriptSegment[][];
+  nextIndex: number;
+}
+
+const memoryProgress = new Map<string, SavedProgress>();
+
+function fileKey(file: File): string {
+  return `${file.name}\n${file.size}\n${file.lastModified}`;
+}
+
+function recallProgress(key: string): SavedProgress | null {
+  const cached = memoryProgress.get(key);
+  if (cached) return cached;
+  try {
+    const all = JSON.parse(sessionStorage.getItem(PROGRESS_KEY) || '{}') as Record<string, SavedProgress>;
+    return all[key] || null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberProgress(key: string, progress: SavedProgress | null) {
+  if (progress) memoryProgress.set(key, progress);
+  else memoryProgress.delete(key);
+  try {
+    const all = JSON.parse(sessionStorage.getItem(PROGRESS_KEY) || '{}') as Record<string, SavedProgress>;
+    if (progress) all[key] = progress;
+    else delete all[key];
+    sessionStorage.setItem(PROGRESS_KEY, JSON.stringify(all));
+  } catch {
+    // Si el navegador no alcanza a guardar, la copia en memoria sigue sirviendo en esta pestaña.
+  }
+}
+
+function samePlan(left: AudioWindow[], right: AudioWindow[]): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((window, index) =>
+    Math.abs(window.start - right[index].start) < 0.5
+    && Math.abs(window.length - right[index].length) < 0.5
+  );
+}
+
+function spanTooSlow(result: AnalyzeCallResult): boolean {
+  if (result.data.errorType === 'SPLIT_REQUIRED' || result.data.errorType === 'TIMEOUT' || result.status === 504) {
+    return true;
+  }
+  return /tardó demasiado|demasiado largo/i.test(result.data.message || '');
+}
 
 function geminiBusy(result: AnalyzeCallResult): boolean {
   if (result.status === 401 || result.status === 429) return false;
@@ -91,22 +147,29 @@ async function transcribeSpan(
   try {
     result = await postJson('/api/long-audio', { action: 'transcribe', blobUrl, start, length });
   } catch {
-    if (length > 20 && depth < 6) {
+    if (length > MIN_SPAN_SEC && depth < MAX_SPLIT_DEPTH) {
       const half = length / 2;
       const left = await transcribeSpan(blobUrl, start, half, depth + 1, 0, onWait);
       const right = await transcribeSpan(blobUrl, start + half, length - half, depth + 1, 0, onWait);
       return [...left, ...right];
     }
-    throw new Error('Se cortó la conexión al transcribir un tramo. Vuelve a iniciar la auditoría.');
+    if (attempt < 2) {
+      onWait?.(`Se cortó la conexión. Reintento ${attempt + 1} de 2`);
+      await sleep(4000 * (attempt + 1));
+      return transcribeSpan(blobUrl, start, length, depth, attempt + 1, onWait);
+    }
+    throw new Error('Se cortó la conexión al transcribir un tramo. Pulsa Continuar para retomarlo.');
   }
-  const shouldSplit = result.data.errorType === 'SPLIT_REQUIRED'
-    || result.data.errorType === 'TIMEOUT'
-    || result.status === 504;
-  if (shouldSplit && length > 20 && depth < 6) {
+  if (spanTooSlow(result) && length > MIN_SPAN_SEC && depth < MAX_SPLIT_DEPTH) {
     const half = length / 2;
     const left = await transcribeSpan(blobUrl, start, half, depth + 1, 0, onWait);
     const right = await transcribeSpan(blobUrl, start + half, length - half, depth + 1, 0, onWait);
     return [...left, ...right];
+  }
+  if (spanTooSlow(result) && attempt < 3) {
+    onWait?.(`El tramo no alcanzó. Reintento ${attempt + 1} de 3`);
+    await sleep(5000 * (attempt + 1));
+    return transcribeSpan(blobUrl, start, length, depth, attempt + 1, onWait);
   }
   if (geminiBusy(result) && attempt < BUSY_WAITS_MS.length) {
     onWait?.(`Gemini ocupado, reintento ${attempt + 1} de ${BUSY_WAITS_MS.length}`);
@@ -127,37 +190,71 @@ async function analyzeOnWeb(
   meta: AnalyzeCallMeta,
   onProgress?: (progress: number, detail: string) => void
 ): Promise<AnalyzeCallResult> {
-  onProgress?.(2, 'Subiendo audio');
-  const blob = await upload(meta.fileName || file.name, file, {
-    access: 'private',
-    handleUploadUrl: '/api/blob-upload',
-    contentType: file.type || 'application/octet-stream',
-    multipart: file.size > 4 * 1024 * 1024,
-    onUploadProgress: ({ percentage }) => {
-      onProgress?.(Math.max(2, Math.min(10, Math.round(percentage * 0.1))), 'Subiendo audio');
-    },
-  });
+  const key = fileKey(file);
+  const saved = recallProgress(key);
+  let blobUrl = saved?.blobUrl || '';
+  let keepBlob = false;
+
+  const uploadAudio = async () => {
+    onProgress?.(2, 'Subiendo audio');
+    const blob = await upload(meta.fileName || file.name, file, {
+      access: 'private',
+      handleUploadUrl: '/api/blob-upload',
+      contentType: file.type || 'application/octet-stream',
+      multipart: file.size > 4 * 1024 * 1024,
+      onUploadProgress: ({ percentage }) => {
+        onProgress?.(Math.max(2, Math.min(10, Math.round(percentage * 0.1))), 'Subiendo audio');
+      },
+    });
+    blobUrl = blob.url;
+  };
 
   try {
-    onProgress?.(12, 'Leyendo duración');
-    const plan = await postJson('/api/long-audio', { action: 'plan', blobUrl: blob.url });
+    if (!blobUrl) await uploadAudio();
+
+    onProgress?.(12, saved?.nextIndex ? `Retomando en el tramo ${saved.nextIndex + 1}` : 'Leyendo duración');
+    let plan = await postJson('/api/long-audio', { action: 'plan', blobUrl });
+    if ((!plan.ok || !plan.data.success) && saved?.blobUrl) {
+      await uploadAudio();
+      plan = await postJson('/api/long-audio', { action: 'plan', blobUrl });
+    }
     if (!plan.ok || !plan.data.success) return plan;
 
     const windows = (plan.data.windows || []) as AudioWindow[];
-    const groups: TranscriptSegment[][] = [];
-    for (let index = 0; index < windows.length; index++) {
+    const durationSeconds = Number(plan.data.durationSeconds) || 0;
+    const canResume = Boolean(saved && samePlan(saved.windows, windows));
+    const groups: TranscriptSegment[][] = canResume ? saved!.groups.slice() : [];
+    let nextIndex = canResume ? Math.min(saved!.nextIndex, windows.length) : 0;
+    keepBlob = true;
+
+    const store = () => rememberProgress(key, { blobUrl, durationSeconds, windows, groups, nextIndex });
+    store();
+
+    for (let index = nextIndex; index < windows.length; index++) {
       const window = windows[index];
       const progress = 14 + Math.round((index / Math.max(1, windows.length)) * 74);
       onProgress?.(progress, `Tramo ${index + 1} de ${windows.length}`);
-      groups.push(await transcribeSpan(blob.url, window.start, window.length, 0, 0, (detail) => {
-        onProgress?.(progress, detail);
-      }));
+      try {
+        groups[index] = await transcribeSpan(blobUrl, window.start, window.length, 0, 0, (detail) => {
+          onProgress?.(progress, detail);
+        });
+      } catch (err) {
+        nextIndex = index;
+        store();
+        const reason = err instanceof Error ? err.message : 'No se pudo transcribir el tramo';
+        const notice = index === 0
+          ? 'No se pudo transcribir el primer tramo. Pulsa Continuar para reintentarlo.'
+          : `Se guardó hasta el tramo ${index} de ${windows.length}. Pulsa Continuar para retomar ese audio.`;
+        throw new Error(`${notice} ${reason}`);
+      }
+      nextIndex = index + 1;
+      store();
     }
 
     onProgress?.(92, 'Auditando la llamada');
     const auditPayload = {
       action: 'audit',
-      durationSeconds: plan.data.durationSeconds,
+      durationSeconds,
       groups,
       fileName: meta.fileName || file.name,
       agentName: meta.agentName,
@@ -170,9 +267,15 @@ async function analyzeOnWeb(
       await sleep(10000 * attempt);
       audit = await postJson('/api/long-audio', auditPayload);
     }
+    if (audit.ok && audit.data.success) {
+      keepBlob = false;
+      rememberProgress(key, null);
+    }
     return audit;
   } finally {
-    await postJson('/api/long-audio', { action: 'cleanup', blobUrl: blob.url }).catch(() => undefined);
+    if (blobUrl && !keepBlob) {
+      await postJson('/api/long-audio', { action: 'cleanup', blobUrl }).catch(() => undefined);
+    }
   }
 }
 
