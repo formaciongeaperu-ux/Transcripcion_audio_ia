@@ -106,7 +106,7 @@ export function mapCallRecordToDb(record: CallRecord, userId?: string) {
     resumen: record.resumen || '',
     motivo_categoria: record.motivo_categoria || 'soporte',
     motivo_nombre: record.motivo_nombre || 'Consulta General',
-    sentimiento_score: record.sentimiento_score || 0,
+    sentimiento_score: Number.isFinite(Number(record.sentimiento_score)) ? Number(record.sentimiento_score) : 0,
     sentimiento_label: record.sentimiento_label || 'Neutro',
     csat_estimado: Math.round(Number(record.csat_estimado) || 4),
     resolucion_primer_contacto: record.resolucion_primer_contacto ?? true,
@@ -120,7 +120,9 @@ export function mapCallRecordToDb(record: CallRecord, userId?: string) {
     keywords: record.keywords || [],
     alertas: record.alertas || [],
     segmentos: segmentosClean,
-    audio_url: record.audio_url || null,
+    audio_url: record.audio_url && !record.audio_url.startsWith('blob:') && !record.audio_url.startsWith('data:')
+      ? record.audio_url
+      : null,
     file_name: record.file_name || null,
     file_size_kb: record.file_size_kb == null ? null : Math.round(Number(record.file_size_kb) || 0),
     modelo_procesado: record.modelo_procesado || 'Groq + Llama 3.3',
@@ -134,18 +136,26 @@ export function mapCallRecordToDb(record: CallRecord, userId?: string) {
  */
 export async function fetchCallRecordsFromSupabase(): Promise<{ data: CallRecord[] | null; error: Error | null }> {
   try {
-    const { data, error } = await supabase
-      .from('call_records')
-      .select('*')
-      .order('fecha_hora', { ascending: false });
+    const pageSize = 1000;
+    const rows: any[] = [];
 
-    if (error) {
-      console.error('[Supabase] Error al cargar call_records:', error);
-      return { data: null, error: new Error(error.message) };
+    for (let from = 0; from < 20000; from += pageSize) {
+      const { data, error } = await supabase
+        .from('call_records')
+        .select('*')
+        .order('fecha_hora', { ascending: false })
+        .range(from, from + pageSize - 1);
+
+      if (error) {
+        console.error('[Supabase] Error al cargar call_records:', error);
+        return { data: null, error: new Error(error.message) };
+      }
+
+      rows.push(...(data || []));
+      if (!data || data.length < pageSize) break;
     }
 
-    const records = (data || []).map(mapDbToCallRecord);
-    return { data: records, error: null };
+    return { data: rows.map(mapDbToCallRecord), error: null };
   } catch (err: any) {
     console.error('[Supabase] Excepción en fetchCallRecordsFromSupabase:', err);
     return { data: null, error: err };
@@ -155,19 +165,31 @@ export async function fetchCallRecordsFromSupabase(): Promise<{ data: CallRecord
 /**
  * Guarda o actualiza un registro de llamada en Supabase
  */
+async function writeCallRecord(payload: Record<string, unknown>): Promise<{ success: boolean; error: Error | null }> {
+  const inserted = await supabase.from('call_records').insert(payload);
+
+  if (!inserted.error) return { success: true, error: null };
+
+  // La fila ya existe: queda en la base aunque esta sesión no pueda actualizarla.
+  if (inserted.error.code === '23505') return { success: true, error: null };
+
+  const message = inserted.error.message || '';
+  if (payload.auditor_id && /auditor_id/i.test(message)) {
+    const { auditor_id: _auditorId, ...withoutAuditor } = payload;
+    const retried = await supabase.from('call_records').insert(withoutAuditor);
+    if (!retried.error || retried.error.code === '23505') return { success: true, error: null };
+    console.error('[Supabase] Error al guardar call_record:', retried.error);
+    return { success: false, error: new Error(retried.error.message) };
+  }
+
+  console.error('[Supabase] Error al guardar call_record:', inserted.error);
+  return { success: false, error: new Error(message) };
+}
+
 export async function saveCallRecordToSupabase(record: CallRecord, userId?: string): Promise<{ success: boolean; error: Error | null }> {
   try {
     const dbPayload = mapCallRecordToDb(record, userId);
-    const { error } = await supabase
-      .from('call_records')
-      .upsert(dbPayload, { onConflict: 'id' });
-
-    if (error) {
-      console.error('[Supabase] Error al guardar call_record:', error);
-      return { success: false, error: new Error(error.message) };
-    }
-
-    return { success: true, error: null };
+    return await writeCallRecord(dbPayload);
   } catch (err: any) {
     console.error('[Supabase] Excepción en saveCallRecordToSupabase:', err);
     return { success: false, error: err };
@@ -181,17 +203,15 @@ export async function bulkSaveCallRecordsToSupabase(records: CallRecord[], userI
   try {
     if (!records.length) return { savedCount: 0, error: null };
 
-    const payloads = records.map(r => mapCallRecordToDb(r, userId));
-    const { error } = await supabase
-      .from('call_records')
-      .upsert(payloads, { onConflict: 'id' });
-
-    if (error) {
-      console.error('[Supabase] Error en bulkSaveCallRecordsToSupabase:', error);
-      return { savedCount: 0, error: new Error(error.message) };
+    let savedCount = 0;
+    let lastError: Error | null = null;
+    for (const record of records) {
+      const saved = await saveCallRecordToSupabase(record, userId);
+      if (saved.success) savedCount += 1;
+      else lastError = saved.error;
     }
 
-    return { savedCount: records.length, error: null };
+    return { savedCount, error: lastError };
   } catch (err: any) {
     console.error('[Supabase] Excepción en bulkSaveCallRecordsToSupabase:', err);
     return { savedCount: 0, error: err };

@@ -18,7 +18,7 @@ import { exportCallsToExcel, exportCallsToCSV, exportSingleCallReport } from './
 import { SpreadsheetInfo, appendCallsToSpreadsheet } from './services/sheetsService';
 import { DriveFolderInfo, uploadAudioToDrive } from './services/driveService';
 import { getAccessToken } from './services/googleAuth';
-import { fetchCallRecordsFromSupabase, saveCallRecordToSupabase, bulkSaveCallRecordsToSupabase } from './services/supabaseService';
+import { fetchCallRecordsFromSupabase, saveCallRecordToSupabase } from './services/supabaseService';
 import { analyzeUploadedCall } from './services/analyzeCall';
 import { useAuth } from './contexts/AuthContext';
 
@@ -50,47 +50,96 @@ export default function App() {
   const [isRetryingQueue, setIsRetryingQueue] = useState<boolean>(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState<boolean>(false);
   const [selectedCohort, setSelectedCohort] = useState<string>('all');
+  const [dbNotice, setDbNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
+  const unsavedRef = React.useRef<Map<string, CallRecord>>(new Map());
 
   const { user, loading: authLoading } = useAuth();
 
-  // Cargar llamadas desde Supabase al iniciar sesión y limpiar memoria al cerrar sesión
+  const applyDatabaseRows = React.useCallback((rows: CallRecord[]) => {
+    const ids = new Set(rows.map((row) => row.id));
+    const pending: CallRecord[] = [];
+    unsavedRef.current.forEach((row) => {
+      if (!ids.has(row.id)) pending.push(row);
+    });
+    setCalls([...pending, ...rows]);
+  }, []);
+
+  const reloadFromDatabase = React.useCallback(async () => {
+    const { data, error } = await fetchCallRecordsFromSupabase();
+    if (error || !data) {
+      setDbNotice({ tone: 'error', text: error?.message || 'No se pudo leer call_records.' });
+      return null;
+    }
+    applyDatabaseRows(data);
+    return data;
+  }, [applyDatabaseRows]);
+
+  // La base es la fuente del listado. Lo que solo está en este navegador se reintenta una vez.
   useEffect(() => {
+    if (authLoading) return;
     if (!user) {
+      unsavedRef.current.clear();
       setCalls([]);
       setSelectedCall(null);
+      setDbNotice(null);
       return;
     }
 
     let isMounted = true;
-    fetchCallRecordsFromSupabase().then(({ data, error }) => {
+    (async () => {
+      const first = await fetchCallRecordsFromSupabase();
       if (!isMounted) return;
-      if (data && data.length > 0) {
-        setCalls((prev) => {
-          const dbIds = new Set(data.map((d) => d.id));
-          const localOnly = prev.filter((p) => !dbIds.has(p.id));
-          // Si hay llamadas locales que aún no están en la nube, sincronizarlas
-          if (localOnly.length > 0) {
-            bulkSaveCallRecordsToSupabase(localOnly, user.id).catch(console.warn);
-          }
-          return [...data, ...localOnly];
-        });
-      } else if (data && data.length === 0) {
-        // Si la base en Supabase está vacía pero hay historial en el navegador, subirlo
-        const saved = localStorage.getItem('claro_speech_calls_v2');
-        if (saved) {
-          try {
-            const parsed = JSON.parse(saved);
-            if (Array.isArray(parsed) && parsed.length > 0) {
-              bulkSaveCallRecordsToSupabase(parsed, user.id).catch(console.warn);
-            }
-          } catch {}
+      if (first.error || !first.data) {
+        setDbNotice({ tone: 'error', text: first.error?.message || 'No se pudo leer call_records.' });
+        return;
+      }
+
+      const present = new Set(first.data.map((row) => row.id));
+      let local: CallRecord[] = [];
+      try {
+        const raw = localStorage.getItem('claro_speech_calls_v2');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) local = parsed;
+        }
+      } catch {}
+
+      const missing = local.filter((row) => row?.id && !present.has(row.id));
+      const failures: string[] = [];
+      for (const call of missing) {
+        const saved = await saveCallRecordToSupabase(call, user.id);
+        if (!isMounted) return;
+        if (saved.success) unsavedRef.current.delete(call.id);
+        else {
+          unsavedRef.current.set(call.id, call);
+          failures.push(saved.error?.message || 'error desconocido');
         }
       }
-    });
+
+      const second = missing.length > 0 ? await fetchCallRecordsFromSupabase() : first;
+      if (!isMounted) return;
+      applyDatabaseRows(second.data || first.data);
+      if (failures.length > 0) {
+        setDbNotice({
+          tone: 'error',
+          text: `Hay ${failures.length} auditoría(s) de este navegador que la base rechazó: ${failures[0]}`
+        });
+      }
+    })();
+
     return () => {
       isMounted = false;
     };
-  }, [user]);
+  }, [user, authLoading, applyDatabaseRows]);
+
+  useEffect(() => {
+    if (!user) return;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') reloadFromDatabase();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [user, reloadFromDatabase]);
 
   // Global keyboard shortcut Ctrl+K / Cmd+K to open Command Palette
   useEffect(() => {
@@ -189,8 +238,10 @@ export default function App() {
     localStorage.setItem('claro_autoupload_drive', JSON.stringify(enabled));
   };
 
-  // Sync calls to local storage
+  // Sync calls to local storage. No escribir mientras la sesión todavía se está leyendo:
+  // en ese momento user es null y borrar el listado eliminaría auditorías que aún no entraron a la base.
   useEffect(() => {
+    if (authLoading) return;
     try {
       const serializable = calls.map((c) => {
         const { audioFile, ...rest } = c;
@@ -200,7 +251,7 @@ export default function App() {
     } catch (e) {
       console.warn('Error al persistir llamadas en localStorage', e);
     }
-  }, [calls]);
+  }, [calls, authLoading]);
 
   // Keep selectedCall in sync if calls change
   useEffect(() => {
@@ -221,13 +272,13 @@ export default function App() {
   };
 
   // Handle new calls processed via upload modal
-  const handleCallsProcessed = async (newCalls: CallRecord[]) => {
+  const handleCallsProcessed = async (newCalls: CallRecord[]): Promise<{ failedIds: string[]; message: string }> => {
+    if (newCalls.length === 0) return { failedIds: [], message: '' };
     setCalls((prev) => [...newCalls, ...prev]);
-    if (newCalls.length > 0) {
-      setSelectedCall(newCalls[0]);
-      setActiveTab('audit');
+    setSelectedCall(newCalls[0]);
+    setActiveTab('audit');
 
-      // Auto-sync with connected Google Sheets & Drive if enabled
+    // Auto-sync with connected Google Sheets & Drive if enabled
       if (connectedSpreadsheet && autoSyncSheets) {
         try {
           const token = await getAccessToken();
@@ -259,14 +310,31 @@ export default function App() {
         }
       }
 
-      // Guardar automáticamente en Supabase Cloud Database
+      const failedIds: string[] = [];
+      let firstError = '';
       for (const call of newCalls) {
         const saved = await saveCallRecordToSupabase(call, user?.id);
-        if (!saved.success) {
-          console.error('[Supabase] No se guardó la llamada:', saved.error);
+        if (saved.success) {
+          unsavedRef.current.delete(call.id);
+        } else {
+          unsavedRef.current.set(call.id, call);
+          failedIds.push(call.id);
+          if (!firstError) firstError = saved.error?.message || 'error desconocido';
         }
       }
-    }
+
+      await reloadFromDatabase();
+      if (failedIds.length > 0) {
+        const message = `No se guardó en la base: ${firstError}`;
+        setDbNotice({ tone: 'error', text: message });
+        return { failedIds, message };
+      }
+
+      const message = newCalls.length === 1
+        ? 'La auditoría quedó guardada en la base y en el listado.'
+        : `Quedaron ${newCalls.length} auditorías guardadas en la base y en el listado.`;
+      setDbNotice({ tone: 'ok', text: message });
+      return { failedIds: [], message };
   };
 
   // Import calls from Google Sheets
@@ -308,7 +376,7 @@ export default function App() {
         newCall.audio_url = URL.createObjectURL(item.file);
         newCall.audioFile = item.file;
         newCall.file_name = item.file.name;
-        setCalls((prev) => [newCall, ...prev]);
+        await handleCallsProcessed([newCall]);
         handleRemoveDeferredItem(item.id);
       }
     } catch {
@@ -411,6 +479,24 @@ export default function App() {
         {/* Content Area */}
         <main className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-5">
           <div className="mx-auto max-w-[1600px] w-full">
+            {dbNotice && (
+              <div
+                className={`mb-4 flex items-start justify-between gap-3 rounded-2xl border px-4 py-3 text-sm ${
+                  dbNotice.tone === 'error'
+                    ? 'border-[#F6AEA9] bg-[#FCE8E6] text-[#C5221F]'
+                    : 'border-[#CEEAD6] bg-[#E6F4EA] text-[#137333]'
+                }`}
+              >
+                <p>{dbNotice.text}</p>
+                <button
+                  type="button"
+                  onClick={() => setDbNotice(null)}
+                  className="shrink-0 text-xs font-bold uppercase"
+                >
+                  Cerrar
+                </button>
+              </div>
+            )}
             {activeTab === 'dashboard' && (
               <DashboardView
                 calls={visibleCalls}

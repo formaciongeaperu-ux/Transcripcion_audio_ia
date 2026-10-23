@@ -19,7 +19,7 @@ import { analyzeUploadedCall } from '../services/analyzeCall';
 interface UploadModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onCallsProcessed: (newCalls: CallRecord[]) => void;
+  onCallsProcessed: (newCalls: CallRecord[]) => void | Promise<{ failedIds: string[]; message: string } | void>;
   onAddToDeferredQueue: (item: UploadItem) => void;
 }
 
@@ -203,10 +203,20 @@ export const UploadModal: React.FC<UploadModalProps> = ({
 
     await Promise.all(activeWorkers);
 
-    setIsProcessing(false);
     if (completedCalls.length > 0) {
-      onCallsProcessed(completedCalls);
+      const result = await onCallsProcessed(completedCalls);
+      if (result?.failedIds?.length) {
+        const failed = new Set(result.failedIds);
+        setItems((prev) =>
+          prev.map((it) =>
+            it.resultRecord && failed.has(it.resultRecord.id)
+              ? { ...it, status: 'error', errorMessage: result.message || 'No se guardó en la base' }
+              : it
+          )
+        );
+      }
     }
+    setIsProcessing(false);
   };
 
   const formatBytes = (bytes: number) => {
