@@ -1079,6 +1079,7 @@ function finalizeCallAnalysis(parsed, ctx) {
   };
   const durationSeconds = ctx.durationSeconds || parsed.silencio_analisis?.duracion_total_segundos || 420;
   return {
+    ...parsed,
     id: `call-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
     codigo_llamada: `REC-2026-CHILE-${Math.floor(1e3 + Math.random() * 9e3)}`,
     fecha_hora: (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").substring(0, 16),
@@ -1089,10 +1090,9 @@ function finalizeCallAnalysis(parsed, ctx) {
     cliente_telefono: "+56 9 " + Math.floor(6e7 + Math.random() * 39999999),
     cola_atencion: queue,
     duracion_total: formatSeconds(durationSeconds),
-    duracion_segundos: durationSeconds,
+    duracion_segundos: Math.round(Number(durationSeconds) || 0),
     sentimiento_label: parsed.sentimiento_score > 0.2 ? "Positivo" : parsed.sentimiento_score < -0.2 ? "Negativo" : "Neutro",
     modelo_procesado: model,
-    ...parsed,
     qa_score_global: avgScore,
     nps_pronostico: normalizedNpsPronostico,
     cumplimiento_guion: normalizedCumplimientoGuion,

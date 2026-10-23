@@ -261,9 +261,10 @@ export default function App() {
 
       // Guardar automáticamente en Supabase Cloud Database
       for (const call of newCalls) {
-        saveCallRecordToSupabase(call, user?.id).catch((err) =>
-          console.warn('[Supabase] Error al persistir llamada:', err)
-        );
+        const saved = await saveCallRecordToSupabase(call, user?.id);
+        if (!saved.success) {
+          console.error('[Supabase] No se guardó la llamada:', saved.error);
+        }
       }
     }
   };
