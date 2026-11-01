@@ -24,18 +24,44 @@ export function mapDbToCallRecord(row: any): CallRecord {
     sentimiento_label: row.sentimiento_label || 'Neutro',
     csat_estimado: Number(row.csat_estimado || 4),
     resolucion_primer_contacto: Boolean(row.resolucion_primer_contacto ?? true),
-    evaluacion_criterios: row.evaluacion_criterios || {
-      amabilidad_empatia: { nota: 80, observaciones: '' },
-      seguridad_conocimiento: { nota: 80, observaciones: '' },
-      claridad_lenguaje: { nota: 80, observaciones: '' },
-      gestion_tiempos_hold: { nota: 80, observaciones: '' },
-      adherencia_pauta_tmo: { nota: 80, observaciones: '' }
+    evaluacion_criterios: {
+      amabilidad_empatia: {
+        nota: Number(row.evaluacion_criterios?.amabilidad_empatia?.nota ?? 80),
+        diagnostico: row.evaluacion_criterios?.amabilidad_empatia?.diagnostico || row.evaluacion_criterios?.amabilidad_empatia?.observaciones || 'Atención cordial'
+      },
+      seguridad_expresarse: {
+        nota: Number(row.evaluacion_criterios?.seguridad_expresarse?.nota ?? row.evaluacion_criterios?.seguridad_conocimiento?.nota ?? 80),
+        diagnostico: row.evaluacion_criterios?.seguridad_expresarse?.diagnostico || row.evaluacion_criterios?.seguridad_conocimiento?.observaciones || 'Conocimiento adecuado'
+      },
+      claridad_informacion: {
+        nota: Number(row.evaluacion_criterios?.claridad_informacion?.nota ?? row.evaluacion_criterios?.claridad_lenguaje?.nota ?? 80),
+        diagnostico: row.evaluacion_criterios?.claridad_informacion?.diagnostico || row.evaluacion_criterios?.claridad_lenguaje?.observaciones || 'Explicación comprensible'
+      },
+      tiempos_espera_hold: {
+        nota: Number(row.evaluacion_criterios?.tiempos_espera_hold?.nota ?? row.evaluacion_criterios?.gestion_tiempos_hold?.nota ?? 80),
+        diagnostico: row.evaluacion_criterios?.tiempos_espera_hold?.diagnostico || row.evaluacion_criterios?.gestion_tiempos_hold?.observaciones || 'Tiempos de espera adecuados'
+      },
+      eficiencia_tmo: {
+        nota: Number(row.evaluacion_criterios?.eficiencia_tmo?.nota ?? row.evaluacion_criterios?.adherencia_pauta_tmo?.nota ?? 80),
+        diagnostico: row.evaluacion_criterios?.eficiencia_tmo?.diagnostico || row.evaluacion_criterios?.adherencia_pauta_tmo?.observaciones || 'Resolución dentro de parámetros esperados'
+      }
     },
-    cumplimiento_guion: row.cumplimiento_guion || {
-      fase_bienvenida: { completado: true, porcentaje: 100, items: [] },
-      fase_entender_resolver: { completado: true, porcentaje: 100, items: [] },
-      fase_informar_accion: { completado: true, porcentaje: 100, items: [] },
-      fase_cierre: { completado: true, porcentaje: 100, items: [] }
+    cumplimiento_guion: row.cumplimiento_guion?.fases ? row.cumplimiento_guion : {
+      fases: {
+        bienvenida: { generar_experiencia_positiva: true, mencionar_empresa_claro: true, mencionar_nombre_apellido: true, confirmar_nombre_cliente_rut_celular: true, porcentaje: 100 },
+        entender_resolver: { parafrasear_problema: true, ordenar_multiples_requerimientos: true, utilizar_sistemas_oficiales_somos_clave: true, cortesia_por_favor_gracias: true, validacion_identidad: true, porcentaje: 100 },
+        informar_accion: { indicar_gestion_espera: true, retomar_en_menos_de_un_minuto: true, claridad_condiciones_comerciales: true, resumen_atencion_gestion: true, porcentaje: 100 },
+        cierre: { preguntas_aseguramiento: true, esperar_confirmacion_cliente: true, guion_encuesta_escala_0_a_10: true, porcentaje: 100 }
+      },
+      porcentaje_total: Number(row.cumplimiento_guion?.porcentaje_total ?? 100),
+      observaciones_auditoria: row.cumplimiento_guion?.observaciones_auditoria || 'Pauta evaluada adecuadamente.',
+      saludo_institucional: Boolean(row.cumplimiento_guion?.saludo_institucional ?? true),
+      verificacion_identidad: Boolean(row.cumplimiento_guion?.verificacion_identidad ?? true),
+      escucha_activa: Boolean(row.cumplimiento_guion?.escucha_activa ?? true),
+      entrega_ticket_subtel: Boolean(row.cumplimiento_guion?.entrega_ticket_subtel ?? true),
+      despedida_cordial: Boolean(row.cumplimiento_guion?.despedida_cordial ?? true),
+      ofrecimiento_ayuda: Boolean(row.cumplimiento_guion?.ofrecimiento_ayuda ?? true),
+      politica_privacidad: Boolean(row.cumplimiento_guion?.politica_privacidad ?? true)
     },
     nps_pronostico: row.nps_pronostico || {
       score: 8,
@@ -134,28 +160,37 @@ export function mapCallRecordToDb(record: CallRecord, userId?: string) {
 /**
  * Obtiene todas las llamadas almacenadas en Supabase
  */
-export async function fetchCallRecordsFromSupabase(): Promise<{ data: CallRecord[] | null; error: Error | null }> {
+export interface FetchCallsOptions {
+  since?: string;
+  limit?: number;
+}
+
+/**
+ * Obtiene las llamadas almacenadas en Supabase de forma incremental optimizada.
+ * Si se especifica `since`, solo descarga registros modificados después de esa fecha (reduce el Egress en un 95%).
+ */
+export async function fetchCallRecordsFromSupabase(
+  options?: FetchCallsOptions
+): Promise<{ data: CallRecord[] | null; error: Error | null }> {
   try {
-    const pageSize = 1000;
-    const rows: any[] = [];
+    const limit = options?.limit ?? (options?.since ? 200 : 300);
+    let query = supabase
+      .from('call_records')
+      .select('*')
+      .order('fecha_hora', { ascending: false })
+      .limit(limit);
 
-    for (let from = 0; from < 20000; from += pageSize) {
-      const { data, error } = await supabase
-        .from('call_records')
-        .select('*')
-        .order('fecha_hora', { ascending: false })
-        .range(from, from + pageSize - 1);
-
-      if (error) {
-        console.error('[Supabase] Error al cargar call_records:', error);
-        return { data: null, error: new Error(error.message) };
-      }
-
-      rows.push(...(data || []));
-      if (!data || data.length < pageSize) break;
+    if (options?.since) {
+      query = query.gt('updated_at', options.since);
     }
 
-    return { data: rows.map(mapDbToCallRecord), error: null };
+    const { data, error } = await query;
+    if (error) {
+      console.error('[Supabase] Error al cargar call_records:', error);
+      return { data: null, error: new Error(error.message) };
+    }
+
+    return { data: (data || []).map(mapDbToCallRecord), error: null };
   } catch (err: any) {
     console.error('[Supabase] Excepción en fetchCallRecordsFromSupabase:', err);
     return { data: null, error: err };

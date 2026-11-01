@@ -57,13 +57,15 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
 
   // Fallback conversion to standard PCM using the backend ffmpeg engine
   const convertWithServer = async (fileOrBlob: Blob): Promise<Blob> => {
-    const arrayBuffer = await fileOrBlob.arrayBuffer();
-    const bytes = new Uint8Array(arrayBuffer);
-    let binary = '';
-    for (let i = 0; i < bytes.byteLength; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    const base64 = btoa(binary);
+    const base64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        resolve(result.split(',')[1] || '');
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(fileOrBlob);
+    });
 
     const res = await fetch('/api/convert-audio', {
       method: 'POST',

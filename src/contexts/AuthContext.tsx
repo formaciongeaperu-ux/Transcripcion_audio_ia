@@ -44,7 +44,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (error) {
         // Si no existe fila en profiles, creamos un perfil base
         console.warn('[Auth] Perfil no encontrado, creando por defecto:', error.message);
-        const isSuperAdminEmail = userEmail?.toLowerCase() === 'clydelean3@gmail.com';
+        const adminList = (((import.meta as any).env?.VITE_SUPER_ADMIN_EMAILS || 'clydelean3@gmail.com') as string).toLowerCase().split(',').map((e: string) => e.trim());
+        const isSuperAdminEmail = !!userEmail && adminList.includes(userEmail.toLowerCase());
         const fallbackProfile: UserProfile = {
           id: userId,
           email: userEmail || '',
@@ -58,7 +59,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const prof = data as UserProfile;
       // El creador/administrador principal siempre recibe rol super_admin
-      if (userEmail?.toLowerCase() === 'clydelean3@gmail.com' && prof.role !== 'super_admin') {
+      const adminList = (((import.meta as any).env?.VITE_SUPER_ADMIN_EMAILS || 'clydelean3@gmail.com') as string).toLowerCase().split(',').map((e: string) => e.trim());
+      if (userEmail && adminList.includes(userEmail.toLowerCase()) && prof.role !== 'super_admin') {
         prof.role = 'super_admin';
         supabase.from('profiles').update({ role: 'super_admin' }).eq('id', userId).then();
       }

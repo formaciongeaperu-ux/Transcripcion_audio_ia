@@ -1,4 +1,5 @@
 import { GoogleGenAI, Type } from '@google/genai';
+import { callAnalysisSchema, finalizeCallAnalysis, getActiveFullPrompt, DEFAULT_BASE_PROMPT } from '../qaEngine.ts';
 
 // Multi-Key API Harness Manager for Gemini
 function getApiKeys(): string[] {
@@ -52,149 +53,7 @@ function formatSeconds(secs: number): string {
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
-const callAnalysisSchema = {
-  type: Type.OBJECT,
-  properties: {
-    resumen: { type: Type.STRING, description: 'Resumen ejecutivo de la llamada' },
-    motivo_categoria: { type: Type.STRING, description: 'Categoria: soporte | ventas | reclamos | bajas | facturacion' },
-    motivo_nombre: { type: Type.STRING, description: 'Nombre descriptivo del motivo o driver de llamada' },
-    sentimiento_score: { type: Type.NUMBER, description: 'Score de sentimiento de -1.0 a 1.0' },
-    evaluacion_criterios: {
-      type: Type.OBJECT,
-      properties: {
-        amabilidad_empatia: {
-          type: Type.OBJECT,
-          properties: {
-            nota: { type: Type.NUMBER, description: 'Puntuación 0 a 100' },
-            diagnostico: { type: Type.STRING, description: 'Justificación detallada con marcas de tiempo' }
-          },
-          required: ['nota', 'diagnostico']
-        },
-        seguridad_expresarse: {
-          type: Type.OBJECT,
-          properties: {
-            nota: { type: Type.NUMBER, description: 'Puntuación 0 a 100' },
-            diagnostico: { type: Type.STRING, description: 'Justificación técnica y solidez verbal' }
-          },
-          required: ['nota', 'diagnostico']
-        },
-        claridad_informacion: {
-          type: Type.OBJECT,
-          properties: {
-            nota: { type: Type.NUMBER, description: 'Puntuación 0 a 100' },
-            diagnostico: { type: Type.STRING, description: 'Justificación didáctica' }
-          },
-          required: ['nota', 'diagnostico']
-        },
-        tiempos_espera_hold: {
-          type: Type.OBJECT,
-          properties: {
-            nota: { type: Type.NUMBER, description: 'Puntuación 0 a 100' },
-            diagnostico: { type: Type.STRING, description: 'Justificación de tiempos de espera' }
-          },
-          required: ['nota', 'diagnostico']
-        },
-        eficiencia_tmo: {
-          type: Type.OBJECT,
-          properties: {
-            nota: { type: Type.NUMBER, description: 'Puntuación 0 a 100' },
-            diagnostico: { type: Type.STRING, description: 'Justificación de agilidad y duración' }
-          },
-          required: ['nota', 'diagnostico']
-        }
-      },
-      required: ['amabilidad_empatia', 'seguridad_expresarse', 'claridad_informacion', 'tiempos_espera_hold', 'eficiencia_tmo']
-    },
-    cumplimiento_guion: {
-      type: Type.OBJECT,
-      properties: {
-        saludo_institucional: { type: Type.BOOLEAN, description: 'Saludo institucional con mención de la marca Claro y nombre del asesor' },
-        verificacion_identidad: { type: Type.BOOLEAN, description: 'Verificación de titularidad mediante RUT chileno' },
-        escucha_activa: { type: Type.BOOLEAN, description: 'Escucha activa sin interrupciones ni sobreposiciones' },
-        entrega_ticket_subtel: { type: Type.BOOLEAN, description: 'Entrega de número de orden / reclamo / ticket de atención (obligatorio por normativa SUBTEL)' },
-        despedida_cordial: { type: Type.BOOLEAN, description: 'Despedida cordial de cierre' },
-        ofrecimiento_ayuda: { type: Type.BOOLEAN },
-        politica_privacidad: { type: Type.BOOLEAN }
-      },
-      required: ['saludo_institucional', 'verificacion_identidad', 'escucha_activa', 'entrega_ticket_subtel', 'despedida_cordial']
-    },
-    nps_pronostico: {
-      type: Type.OBJECT,
-      properties: {
-        score: { type: Type.NUMBER, description: 'Puntaje predicho de 0 a 10' },
-        clasificacion: { type: Type.STRING, description: 'DETRACTOR (0-6) | NEUTRO (7-8) | PROMOTOR (9-10)' },
-        pregunta: { type: Type.STRING, description: 'Pregunta oficial: ¿Qué tan probable es que recomiendes Claro a un amigo o familiar?' },
-        justificacion: { type: Type.STRING, description: 'Explicación del pronóstico NPS' }
-      },
-      required: ['score', 'clasificacion', 'justificacion']
-    },
-    silencio_analisis: {
-      type: Type.OBJECT,
-      properties: {
-        duracion_total_segundos: { type: Type.NUMBER },
-        tiempo_ivr_segundos: { type: Type.NUMBER, description: 'Tiempo previo en IVR antes de interactuar' },
-        tiempo_agente_segundos: { type: Type.NUMBER, description: 'Tiempo con el agente' },
-        silencio_agente_segundos: { type: Type.NUMBER, description: 'Tiempo total en silencio/dead air con el agente' },
-        porcentaje_silencio: { type: Type.NUMBER, description: 'Porcentaje de silencio con el agente' },
-        nivel_silencio: { type: Type.STRING, description: 'ÓPTIMO | MODERADO | CRÍTICO' },
-        diagnostico_silencio: { type: Type.STRING }
-      },
-      required: ['duracion_total_segundos', 'tiempo_ivr_segundos', 'tiempo_agente_segundos', 'silencio_agente_segundos', 'porcentaje_silencio', 'nivel_silencio', 'diagnostico_silencio']
-    },
-    quiebres_atencion: {
-      type: Type.ARRAY,
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          tiempo: { type: Type.STRING, description: 'Timestamp en formato mm:ss ej 02:45' },
-          segundo: { type: Type.NUMBER },
-          tipo: { type: Type.STRING, description: 'Tipo de quiebre' },
-          cita: { type: Type.STRING, description: 'Cita textual del asesor o silencio' },
-          severidad: { type: Type.STRING, description: 'CRÍTICO | ALTO | MEDIO' },
-          impacto_cliente: { type: Type.STRING }
-        },
-        required: ['tiempo', 'segundo', 'tipo', 'cita', 'severidad', 'impacto_cliente']
-      }
-    },
-    feedback_coaching: {
-      type: Type.OBJECT,
-      properties: {
-        fortalezas: { type: Type.ARRAY, items: { type: Type.STRING } },
-        oportunidades_mejora: { type: Type.ARRAY, items: { type: Type.STRING } },
-        guion_sugerido_alternativo: { type: Type.STRING },
-        plan_accion: { type: Type.STRING }
-      },
-      required: ['fortalezas', 'oportunidades_mejora', 'guion_sugerido_alternativo', 'plan_accion']
-    },
-    keywords: { type: Type.ARRAY, items: { type: Type.STRING } },
-    alertas: { type: Type.ARRAY, items: { type: Type.STRING } },
-    csat_estimado: { type: Type.NUMBER, description: '1 a 5' },
-    resolucion_primer_contacto: { type: Type.BOOLEAN },
-    agente_nombre_detectado: { type: Type.STRING, description: 'Nombre real del asesor que atiende la llamada' },
-    cliente_nombre_detectado: { type: Type.STRING, description: 'Nombre real del cliente mencionado en la llamada (o "Cliente Claro" si no se dice)' },
-    segmentos: {
-      type: Type.ARRAY,
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          hablante: { type: Type.STRING, description: 'agente | cliente' },
-          inicio: { type: Type.NUMBER },
-          fin: { type: Type.NUMBER },
-          texto: { type: Type.STRING },
-          sentimientoScore: { type: Type.NUMBER }
-        },
-        required: ['hablante', 'inicio', 'fin', 'texto', 'sentimientoScore']
-      }
-    }
-  },
-  required: [
-    'resumen', 'motivo_categoria', 'motivo_nombre', 'sentimiento_score',
-    'evaluacion_criterios', 'cumplimiento_guion', 'nps_pronostico',
-    'silencio_analisis', 'quiebres_atencion', 'feedback_coaching',
-    'keywords', 'alertas', 'csat_estimado', 'resolucion_primer_contacto', 'segmentos'
-  ]
-};
-
+// callAnalysisSchema imported from ../qaEngine.ts
 function normalizeCallRecordNPS(parsed: any, avgScore: number) {
   const rawNps = parsed.nps_pronostico || {};
   let score = typeof rawNps.score === 'number' ? Math.round(rawNps.score) : null;
@@ -451,52 +310,7 @@ export default async function handler(req: any, res: any) {
     requestedModelCascade = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-flash-latest']
   } = req.body || {};
 
-  const prompt = `Eres un auditor experto en Speech Analytics y Aseguramiento de la Calidad (QA) para Contact Centers de Claro en Chile.
-
-REGLA SUPREMA - TRANSCRIPCIÓN REAL Y VERÍDICA (ESTRICTAMENTE PROHIBIDO CONTENIDO GENÉRICO O PLANTILLAS):
-- Tu función fundamental es escuchar atentamente el archivo de audio adjunto y transcribir LITERALMENTE lo que se habla en la grabación real.
-- QUEDA ESTRICTAMENTE PROHIBIDO inventar diálogos, usar plantillas prefabricadas o generar textos genéricos de ejemplo como "Juan", "Pedro Pérez", "RUT 12.345.678-K", o conversaciones de muestra.
-- Debes transcribir cada palabra exacta, modismo, pausa y respuesta que se escuche en la llamada real de principio a fin.
-- Si en la llamada los interlocutores dicen sus nombres reales, extráelos en 'agente_nombre_detectado' y 'cliente_nombre_detectado'.
-
-CONTEXTO CULTURAL Y OPERATIVO HÍBRIDO (CHILENO - PERUANO):
-- La atención en los Contact Centers de Claro para Chile involucra habitualmente una interacción híbrida:
-  * ASESORES: Generalmente con acento peruano neutro institucional o formal, protocolos de atención al cliente de telecomunicaciones, modismos de servicio cordiales.
-  * CLIENTES: Ciudadanos chilenos con modismos locales, acento chileno, ritmo y cadencia rápida.
-- Comprende y transcribe fielmente el vocabulario y términos chilenos:
-  * "Boleta" = Cuenta / Factura mensual.
-  * "RUT" = Documento de identidad nacional chileno.
-  * "Al tiro" = De inmediato / Rápidamente.
-  * "Cachar / Cachái" = Entender / ¿Entiendes?
-  * "Chato / Chata" = Molesto(a) / Cansado(a) ("estoy chato con el cobro").
-  * "Caleta" = Mucho / Bastante tiempo.
-  * "Bajar el plan / Portabilidad / Cortar la línea" = Gestiones comerciales.
-  * "Banda ancha / Factibilidad / ONT / Router" = Términos técnicos.
-
-DETECCIÓN DE ALERTAS CRÍTICAS:
-- Registra en 'alertas' si el cliente menciona:
-  * "SERNAC" (Servicio Nacional del Consumidor).
-  * "SUBTEL" (Subsecretaría de Telecomunicaciones).
-  * "Demanda", "Abogado", "Denuncia", "Estafa", "Burla", "Colmo".
-  * Intención de fuga o portabilidad a Entel, Movistar o WOM.
-
-VALIDACIÓN DE GUION INSTITUCIONAL CHILENO:
-- Saludo institucional (mención de la marca Claro y nombre del asesor) -> cumplimiento_guion.saludo_institucional
-- Verificación de titularidad mediante RUT chileno -> cumplimiento_guion.verificacion_identidad
-- Escucha activa sin interrupciones -> cumplimiento_guion.escucha_activa
-- Entrega de número de orden / reclamo / ticket de atención (obligatorio por normativa SUBTEL) -> cumplimiento_guion.entrega_ticket_subtel
-- Despedida cordial -> cumplimiento_guion.despedida_cordial
-
-AUDITORÍA DE CALIDAD Y SPEECH ANALYTICS (CLARO CHILE):
-1. Evalúa los 5 criterios de calidad de 0 a 100: Amabilidad/Empatía, Seguridad al expresarse, Claridad de información, Tiempos de espera (hold), y Eficiencia TMO con diagnósticos descriptivos.
-2. Identifica los QUIEBRES de los asesores a nivel de atención.
-3. Pronóstico de NPS con la pregunta oficial Claro y clasificación DETRACTOR, NEUTRO o PROMOTOR:
-   - REGLA DE ORO PROMOTORES (9-10): Si la llamada tuvo buena atención (QA Score >= 80%), el requerimiento fue resuelto o atendido cordialmente, y el cliente finaliza tranquilo o agradeciendo ("gracias", "muy amable", "se pasó"), el pronóstico tNPS DEBE ser clasificado OBLIGATORIAMENTE como 'PROMOTOR' con nota 9 o 10. ¡No dejes en Neutro llamadas con buen servicio!
-   - Clasifica 'NEUTRO' (7-8) únicamente si la gestión quedó a medias o el cliente se mantuvo apático sin manifestar agradecimiento.
-   - Clasifica 'DETRACTOR' (0-6) solo si hubo quiebre grave atribuible al asesor o queja no resuelta con frustración.
-   - El campo 'clasificacion' DEBE ser exactamente: 'PROMOTOR', 'NEUTRO' o 'DETRACTOR'.
-4. Tiempo de Silencio Conversacional con el agente.
-5. Plan de coaching y feedback accionable para el asesor.`;
+  const prompt = getActiveFullPrompt();
 
   // 1. First & Primary Priority: Google Gemini Pay-As-You-Go (Direct official key)
   const apiKeys = getApiKeys();
@@ -578,28 +392,14 @@ AUDITORÍA DE CALIDAD Y SPEECH ANALYTICS (CLARO CHILE):
               ? parsed.cliente_nombre_detectado
               : 'Cliente Claro';
 
-            const completeRecord = {
-              id: `call-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
-              codigo_llamada: `REC-2026-CHILE-${Math.floor(1000 + Math.random() * 9000)}`,
-              fecha_hora: new Date().toISOString().replace('T', ' ').substring(0, 16),
-              file_name: fileName,
-              agente_nombre: detectedAgent,
-              agente_id: agentId || (parsed.agente_id_detectado || `AG-${Math.floor(7000 + Math.random() * 3000)}`),
-              cliente_nombre: detectedCustomer,
-              cliente_telefono: '+56 9 ' + Math.floor(60000000 + Math.random() * 39999999),
-              cola_atencion: queue,
-              duracion_total: formatSeconds(parsed.silencio_analisis?.duracion_total_segundos || 420),
-              duracion_segundos: parsed.silencio_analisis?.duracion_total_segundos || 420,
-              sentimiento_label: parsed.sentimiento_score > 0.2 ? 'Positivo' : parsed.sentimiento_score < -0.2 ? 'Negativo' : 'Neutro',
-              modelo_procesado: model,
-              ...parsed,
-              qa_score_global: avgScore,
-              nps_pronostico: normalizeCallRecordNPS(parsed, avgScore),
-              segmentos: normalizedSegmentos,
-              transcripcion: {
-                segmentos: normalizedSegmentos
-              }
-            };
+            const completeRecord = finalizeCallAnalysis(parsed, {
+              model,
+              fileName,
+              agentName,
+              agentId: agentId || (parsed.agente_id_detectado || 'AG-4821'),
+              queue,
+              durationSeconds: parsed.silencio_analisis?.duracion_total_segundos || 420
+            });
 
             return res.status(200).json({
               success: true,

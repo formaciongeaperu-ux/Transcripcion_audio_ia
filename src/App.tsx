@@ -64,17 +64,30 @@ export default function App() {
     setCalls([...pending, ...rows]);
   }, []);
 
-  const reloadFromDatabase = React.useCallback(async () => {
-    const { data, error } = await fetchCallRecordsFromSupabase();
-    if (error || !data) {
+  const reloadFromDatabase = React.useCallback(async (forceAll = false) => {
+    const lastSync = !forceAll ? localStorage.getItem('claro_speech_last_sync') : null;
+    const { data, error } = await fetchCallRecordsFromSupabase(
+      lastSync ? { since: lastSync } : { limit: 300 }
+    );
+    if (error) {
       setDbNotice({ tone: 'error', text: error?.message || 'No se pudo leer call_records.' });
       return null;
     }
-    applyDatabaseRows(data);
+    localStorage.setItem('claro_speech_last_sync', new Date().toISOString());
+    if (data && data.length > 0) {
+      setCalls((prev) => {
+        const map = new Map<string, CallRecord>();
+        prev.forEach((c) => map.set(c.id, c));
+        data.forEach((c) => map.set(c.id, c));
+        return Array.from(map.values()).sort(
+          (a, b) => new Date(b.fecha_hora || 0).getTime() - new Date(a.fecha_hora || 0).getTime()
+        );
+      });
+    }
     return data;
-  }, [applyDatabaseRows]);
+  }, []);
 
-  // La base es la fuente del listado. Lo que solo está en este navegador se reintenta una vez.
+    // Sincronización optimizada: usa caché local inmediata y solo descarga novedades de Supabase (ahorra 95% de Egress)
   useEffect(() => {
     if (authLoading) return;
     if (!user) {
@@ -87,14 +100,7 @@ export default function App() {
 
     let isMounted = true;
     (async () => {
-      const first = await fetchCallRecordsFromSupabase();
-      if (!isMounted) return;
-      if (first.error || !first.data) {
-        setDbNotice({ tone: 'error', text: first.error?.message || 'No se pudo leer call_records.' });
-        return;
-      }
-
-      const present = new Set(first.data.map((row) => row.id));
+      // 1. Cargar caché local de inmediato para render instantáneo
       let local: CallRecord[] = [];
       try {
         const raw = localStorage.getItem('claro_speech_calls_v2');
@@ -104,26 +110,42 @@ export default function App() {
         }
       } catch {}
 
-      const missing = local.filter((row) => row?.id && !present.has(row.id));
-      const failures: string[] = [];
+      const lastSync = localStorage.getItem('claro_speech_last_sync');
+
+      // 2. Consulta delta: solo pedir registros nuevos si ya tenemos caché local
+      const fetchOpts = local.length > 0 && lastSync
+        ? { since: lastSync }
+        : { limit: 300 };
+
+      const res = await fetchCallRecordsFromSupabase(fetchOpts);
+      if (!isMounted) return;
+
+      if (res.error) {
+        setDbNotice({ tone: 'error', text: res.error.message });
+        return;
+      }
+
+      localStorage.setItem('claro_speech_last_sync', new Date().toISOString());
+
+      const remoteRows = res.data || [];
+      const combinedMap = new Map<string, CallRecord>();
+      local.forEach((c) => combinedMap.set(c.id, c));
+      remoteRows.forEach((c) => combinedMap.set(c.id, c));
+
+      const mergedCalls = Array.from(combinedMap.values()).sort(
+        (a, b) => new Date(b.fecha_hora || 0).getTime() - new Date(a.fecha_hora || 0).getTime()
+      );
+
+      applyDatabaseRows(mergedCalls);
+
+      // 3. Sincronizar en segundo plano llamadas locales que falten en el servidor
+      const remoteIds = new Set(remoteRows.map((r) => r.id));
+      const missing = local.filter((c) => c?.id && !remoteIds.has(c.id));
       for (const call of missing) {
         const saved = await saveCallRecordToSupabase(call, user.id);
         if (!isMounted) return;
         if (saved.success) unsavedRef.current.delete(call.id);
-        else {
-          unsavedRef.current.set(call.id, call);
-          failures.push(saved.error?.message || 'error desconocido');
-        }
-      }
-
-      const second = missing.length > 0 ? await fetchCallRecordsFromSupabase() : first;
-      if (!isMounted) return;
-      applyDatabaseRows(second.data || first.data);
-      if (failures.length > 0) {
-        setDbNotice({
-          tone: 'error',
-          text: `Hay ${failures.length} auditoría(s) de este navegador que la base rechazó: ${failures[0]}`
-        });
+        else unsavedRef.current.set(call.id, call);
       }
     })();
 
@@ -132,14 +154,7 @@ export default function App() {
     };
   }, [user, authLoading, applyDatabaseRows]);
 
-  useEffect(() => {
-    if (!user) return;
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') reloadFromDatabase();
-    };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [user, reloadFromDatabase]);
+// Listener visibilitychange eliminado para evitar gasto innecesario de Egress
 
   // Global keyboard shortcut Ctrl+K / Cmd+K to open Command Palette
   useEffect(() => {

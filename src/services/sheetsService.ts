@@ -75,7 +75,7 @@ export async function createAuditSpreadsheet(
   // Write headers to row 1
   await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(
-      `${SHEET_TAB_NAME}!A1:O1`
+      `${SHEET_TAB_NAME}!A1:V1`
     )}?valueInputOption=USER_ENTERED`,
     {
       method: 'PUT',
@@ -157,7 +157,7 @@ export async function ensureAuditTab(accessToken: string, spreadsheetId: string)
     // Write headers
     await fetch(
       `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${encodeURIComponent(
-        `${SHEET_TAB_NAME}!A1:O1`
+        `${SHEET_TAB_NAME}!A1:V1`
       )}?valueInputOption=USER_ENTERED`,
       {
         method: 'PUT',
@@ -233,7 +233,7 @@ export async function appendCallsToSpreadsheet(
 
   const response = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}/values/${encodeURIComponent(
-      `${SHEET_TAB_NAME}!A:U`
+      `${SHEET_TAB_NAME}!A:V`
     )}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
     {
       method: 'POST',

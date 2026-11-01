@@ -103,7 +103,7 @@ function markExecutable(filePath: string): string {
   return filePath;
 }
 
-function resolveFfmpeg(): string {
+export function resolveFfmpeg(): string {
   if (process.env.FFMPEG_PATH && fs.existsSync(process.env.FFMPEG_PATH)) {
     return markExecutable(process.env.FFMPEG_PATH);
   }

@@ -6,7 +6,7 @@ import { execFile } from 'child_process';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
-import { AnalysisError, analyzeLongAudio } from './longAudioAnalysis.ts';
+import { AnalysisError, analyzeLongAudio, resolveFfmpeg } from './longAudioAnalysis.ts';
 import {
   DEFAULT_BASE_PROMPT,
   DEFAULT_CUSTOM_DIRECTIVES,
@@ -72,7 +72,7 @@ async function transcodeToCanonicalWav(audioBase64: string): Promise<string> {
     // Convert via ffmpeg to standard canonical 16-bit linear PCM WAV at 16,000 Hz Mono
     await new Promise((resolve, reject) => {
       execFile(
-        'ffmpeg',
+        resolveFfmpeg(),
         ['-y', '-i', tempInput, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', tempOutput],
         (err) => {
           if (err) reject(err);

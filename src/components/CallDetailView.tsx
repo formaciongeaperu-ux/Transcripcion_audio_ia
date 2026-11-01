@@ -568,22 +568,22 @@ export const CallDetailView: React.FC<CallDetailViewProps> = ({
                 </span>
                 <span
                   className={`text-xs font-bold ${
-                    call.evaluacion_criterios.amabilidad_empatia.nota >= 70
+                    (call.evaluacion_criterios?.amabilidad_empatia?.nota ?? 0) >= 70
                       ? 'text-[#34A853]'
                       : 'text-[#EA4335]'
                   }`}
                 >
-                  {call.evaluacion_criterios.amabilidad_empatia.nota}%
+                  {(call.evaluacion_criterios?.amabilidad_empatia?.nota ?? 0)}%
                 </span>
               </div>
               <div className="my-1.5 h-1.5 w-full rounded-full bg-[#F1F3F4]">
                 <div
                   className="h-1.5 rounded-full bg-[#EA4335]"
-                  style={{ width: `${call.evaluacion_criterios.amabilidad_empatia.nota}%` }}
+                  style={{ width: `${(call.evaluacion_criterios?.amabilidad_empatia?.nota ?? 0)}%` }}
                 />
               </div>
               <p className="text-xs leading-relaxed text-[#5F6368]">
-                {call.evaluacion_criterios.amabilidad_empatia.diagnostico}
+                {(call.evaluacion_criterios?.amabilidad_empatia?.diagnostico || '')}
               </p>
             </div>
 
@@ -594,17 +594,17 @@ export const CallDetailView: React.FC<CallDetailViewProps> = ({
                   2. Seguridad al Expresarse
                 </span>
                 <span className="text-xs font-bold text-[#FBBC05]">
-                  {call.evaluacion_criterios.seguridad_expresarse.nota}%
+                  {(call.evaluacion_criterios?.seguridad_expresarse?.nota ?? 0)}%
                 </span>
               </div>
               <div className="my-1.5 h-1.5 w-full rounded-full bg-[#F1F3F4]">
                 <div
                   className="h-1.5 rounded-full bg-[#FBBC05]"
-                  style={{ width: `${call.evaluacion_criterios.seguridad_expresarse.nota}%` }}
+                  style={{ width: `${(call.evaluacion_criterios?.seguridad_expresarse?.nota ?? 0)}%` }}
                 />
               </div>
               <p className="text-xs leading-relaxed text-[#5F6368]">
-                {call.evaluacion_criterios.seguridad_expresarse.diagnostico}
+                {(call.evaluacion_criterios?.seguridad_expresarse?.diagnostico || '')}
               </p>
             </div>
 
@@ -615,17 +615,17 @@ export const CallDetailView: React.FC<CallDetailViewProps> = ({
                   3. Claridad de Información
                 </span>
                 <span className="text-xs font-bold text-[#EA4335]">
-                  {call.evaluacion_criterios.claridad_informacion.nota}%
+                  {(call.evaluacion_criterios?.claridad_informacion?.nota ?? 0)}%
                 </span>
               </div>
               <div className="my-1.5 h-1.5 w-full rounded-full bg-[#F1F3F4]">
                 <div
                   className="h-1.5 rounded-full bg-[#EA4335]"
-                  style={{ width: `${call.evaluacion_criterios.claridad_informacion.nota}%` }}
+                  style={{ width: `${(call.evaluacion_criterios?.claridad_informacion?.nota ?? 0)}%` }}
                 />
               </div>
               <p className="text-xs leading-relaxed text-[#5F6368]">
-                {call.evaluacion_criterios.claridad_informacion.diagnostico}
+                {(call.evaluacion_criterios?.claridad_informacion?.diagnostico || '')}
               </p>
             </div>
 
@@ -636,17 +636,17 @@ export const CallDetailView: React.FC<CallDetailViewProps> = ({
                   4. Tiempos de Espera (Hold)
                 </span>
                 <span className="text-xs font-bold text-[#EA4335]">
-                  {call.evaluacion_criterios.tiempos_espera_hold.nota}%
+                  {(call.evaluacion_criterios?.tiempos_espera_hold?.nota ?? 0)}%
                 </span>
               </div>
               <div className="my-1.5 h-1.5 w-full rounded-full bg-[#F1F3F4]">
                 <div
                   className="h-1.5 rounded-full bg-[#EA4335]"
-                  style={{ width: `${call.evaluacion_criterios.tiempos_espera_hold.nota}%` }}
+                  style={{ width: `${(call.evaluacion_criterios?.tiempos_espera_hold?.nota ?? 0)}%` }}
                 />
               </div>
               <p className="text-xs leading-relaxed text-[#5F6368]">
-                {call.evaluacion_criterios.tiempos_espera_hold.diagnostico}
+                {(call.evaluacion_criterios?.tiempos_espera_hold?.diagnostico || '')}
               </p>
             </div>
 
@@ -657,17 +657,17 @@ export const CallDetailView: React.FC<CallDetailViewProps> = ({
                   5. Eficiencia y TMO
                 </span>
                 <span className="text-xs font-bold text-[#EA4335]">
-                  {call.evaluacion_criterios.eficiencia_tmo.nota}%
+                  {(call.evaluacion_criterios?.eficiencia_tmo?.nota ?? 0)}%
                 </span>
               </div>
               <div className="my-1.5 h-1.5 w-full rounded-full bg-[#F1F3F4]">
                 <div
                   className="h-1.5 rounded-full bg-[#EA4335]"
-                  style={{ width: `${call.evaluacion_criterios.eficiencia_tmo.nota}%` }}
+                  style={{ width: `${(call.evaluacion_criterios?.eficiencia_tmo?.nota ?? 0)}%` }}
                 />
               </div>
               <p className="text-xs leading-relaxed text-[#5F6368]">
-                {call.evaluacion_criterios.eficiencia_tmo.diagnostico}
+                {(call.evaluacion_criterios?.eficiencia_tmo?.diagnostico || '')}
               </p>
             </div>
           </div>
