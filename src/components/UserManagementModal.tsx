@@ -10,11 +10,16 @@ import {
   RefreshCw,
   Award,
   Headphones,
-  UserCheck
+  UserCheck,
+  UserPlus,
+  Key,
+  Mail,
+  User as UserIcon,
+  PlusCircle
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { UserProfile, UserRole } from '../types';
-import { fetchAllProfiles, updateUserProfileRole } from '../services/supabaseService';
+import { fetchAllProfiles, updateUserProfileRole, createAdminUser } from '../services/supabaseService';
 
 interface UserManagementModalProps {
   isOpen: boolean;
@@ -28,6 +33,59 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
   const [search, setSearch] = useState('');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // Formulario de creación de usuario
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [newFullName, setNewFullName] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [newRole, setNewRole] = useState<UserRole>('agent');
+  const [newAgentId, setNewAgentId] = useState('');
+  const [creating, setCreating] = useState(false);
+
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newEmail.trim() || !newPassword.trim() || !newFullName.trim()) {
+      setFeedback({ type: 'error', message: 'Completa el nombre, correo y contraseña del usuario.' });
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      setFeedback({ type: 'error', message: 'La contraseña debe tener al menos 6 caracteres.' });
+      return;
+    }
+
+    setCreating(true);
+    setFeedback(null);
+
+    const { success, error } = await createAdminUser({
+      email: newEmail.trim(),
+      password: newPassword.trim(),
+      fullName: newFullName.trim(),
+      role: newRole,
+      agentId: newAgentId.trim() || undefined,
+      campana: 'Claro Chile'
+    });
+
+    if (error) {
+      setFeedback({ type: 'error', message: `No se pudo crear el usuario: ${error.message}` });
+    } else {
+      setFeedback({
+        type: 'success',
+        message: `Usuario ${newFullName} (${newEmail}) registrado con éxito con rol de ${newRole === 'agent' ? 'Asesor' : newRole}.`
+      });
+      // Limpiar formulario y cerrar panel
+      setNewFullName('');
+      setNewEmail('');
+      setNewPassword('');
+      setNewAgentId('');
+      setNewRole('agent');
+      setShowCreateForm(false);
+      // Recargar lista
+      await loadProfiles();
+    }
+    setCreating(false);
+  };
 
   const loadProfiles = async () => {
     setLoading(true);
@@ -205,8 +263,157 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
               <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
               <span>Actualizar</span>
             </button>
+
+            <button
+              onClick={() => setShowCreateForm((prev) => !prev)}
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-white shadow-xs transition ${
+                showCreateForm ? 'bg-[#C5221F] hover:bg-[#A51D1A]' : 'bg-[#1A73E8] hover:bg-[#1557B0]'
+              }`}
+            >
+              {showCreateForm ? (
+                <>
+                  <X className="h-3.5 w-3.5" />
+                  <span>Cancelar</span>
+                </>
+              ) : (
+                <>
+                  <UserPlus className="h-3.5 w-3.5" />
+                  <span>+ Crear Usuario</span>
+                </>
+              )}
+            </button>
           </div>
         </div>
+
+        {/* Create User Expandable Form */}
+        {showCreateForm && (
+          <form
+            onSubmit={handleCreateUser}
+            className="border-b border-[#E8EAED] bg-[#F8F9FA] p-5 animate-in fade-in slide-in-from-top-2"
+          >
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#1A73E8] text-white">
+                  <UserPlus className="h-4 w-4" />
+                </div>
+                <h4 className="text-xs font-bold text-[#202124]">
+                  Registrar Nuevo Usuario / Asesor en Supabase
+                </h4>
+              </div>
+              <span className="text-[11px] text-[#5F6368]">
+                Se creará en Auth y se asignará automáticamente a la tabla profiles
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3">
+              {/* Full Name */}
+              <div>
+                <label className="block text-[11px] font-bold text-[#3C4043] mb-1">
+                  Nombre Completo *
+                </label>
+                <div className="relative">
+                  <UserIcon className="absolute top-2.5 left-2.5 h-3.5 w-3.5 text-[#80868B]" />
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ej. Raúl Quispe"
+                    value={newFullName}
+                    onChange={(e) => setNewFullName(e.target.value)}
+                    className="w-full rounded-lg border border-[#DADCE0] bg-white py-1.5 pl-8 pr-3 text-xs text-[#202124] focus:border-[#1A73E8] focus:outline-hidden"
+                  />
+                </div>
+              </div>
+
+              {/* Email */}
+              <div>
+                <label className="block text-[11px] font-bold text-[#3C4043] mb-1">
+                  Correo Electrónico *
+                </label>
+                <div className="relative">
+                  <Mail className="absolute top-2.5 left-2.5 h-3.5 w-3.5 text-[#80868B]" />
+                  <input
+                    type="email"
+                    required
+                    placeholder="asesor@geaperu.pe"
+                    value={newEmail}
+                    onChange={(e) => setNewEmail(e.target.value)}
+                    className="w-full rounded-lg border border-[#DADCE0] bg-white py-1.5 pl-8 pr-3 text-xs text-[#202124] focus:border-[#1A73E8] focus:outline-hidden"
+                  />
+                </div>
+              </div>
+
+              {/* Password */}
+              <div>
+                <label className="block text-[11px] font-bold text-[#3C4043] mb-1">
+                  Contraseña Temporal * (mín. 6 car.)
+                </label>
+                <div className="relative">
+                  <Key className="absolute top-2.5 left-2.5 h-3.5 w-3.5 text-[#80868B]" />
+                  <input
+                    type="text"
+                    required
+                    placeholder="Claro2026!"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="w-full rounded-lg border border-[#DADCE0] bg-white py-1.5 pl-8 pr-3 text-xs text-[#202124] focus:border-[#1A73E8] focus:outline-hidden font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Role */}
+              <div>
+                <label className="block text-[11px] font-bold text-[#3C4043] mb-1">
+                  Rol del Usuario *
+                </label>
+                <select
+                  value={newRole}
+                  onChange={(e) => setNewRole(e.target.value as UserRole)}
+                  className="w-full rounded-lg border border-[#DADCE0] bg-white py-1.5 px-3 text-xs font-semibold text-[#202124] focus:border-[#1A73E8] focus:outline-hidden"
+                >
+                  <option value="agent">🎧 Asesor (Solo ve sus propias llamadas)</option>
+                  <option value="supervisor">👥 Supervisor (Ve llamadas de su equipo)</option>
+                  <option value="qa_auditor">🎖️ Auditor QA (Calidad y pautas)</option>
+                  <option value="super_admin">🛡️ Super Administrador (Control total)</option>
+                </select>
+              </div>
+
+              {/* Agent ID */}
+              <div>
+                <label className="block text-[11px] font-bold text-[#3C4043] mb-1">
+                  Código de Agente / Asesor (Opcional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ej. AGT-4821 o DNI"
+                  value={newAgentId}
+                  onChange={(e) => setNewAgentId(e.target.value)}
+                  className="w-full rounded-lg border border-[#DADCE0] bg-white py-1.5 px-3 text-xs text-[#202124] focus:border-[#1A73E8] focus:outline-hidden font-mono"
+                />
+              </div>
+
+              {/* Submit Button */}
+              <div className="flex items-end">
+                <button
+                  type="submit"
+                  disabled={creating}
+                  className="flex h-8.5 w-full items-center justify-center gap-1.5 rounded-lg bg-[#0B192C] px-4 text-xs font-bold text-white shadow-xs hover:bg-[#1E3E62] transition disabled:opacity-50"
+                >
+                  {creating ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <span>Creando en Supabase...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="h-3.5 w-3.5 text-[#34A853]" />
+                      <span>Registrar Usuario</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </form>
+        )}
 
         {/* User Table / List */}
         <div className="flex-1 overflow-y-auto px-6 py-4">

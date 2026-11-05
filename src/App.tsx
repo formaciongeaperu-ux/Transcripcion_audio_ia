@@ -53,7 +53,7 @@ export default function App() {
   const [dbNotice, setDbNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
   const unsavedRef = React.useRef<Map<string, CallRecord>>(new Map());
 
-  const { user, loading: authLoading } = useAuth();
+  const { user, profile, loading: authLoading } = useAuth();
 
   const applyDatabaseRows = React.useCallback((rows: CallRecord[]) => {
     const ids = new Set(rows.map((row) => row.id));
@@ -168,23 +168,45 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Filter calls by selected OJT cohort / campaign
+  // Filter calls by user role (Asesor / Agent sees only their own calls) and selected cohort
   const visibleCalls = React.useMemo(() => {
-    if (selectedCohort === 'all') return calls;
+    let list = calls;
+
+    // Si el usuario autenticado tiene rol de asesor (agent), filtramos estrictamente sus llamadas
+    if (profile?.role === 'agent') {
+      const agentId = (profile.agent_id || '').trim().toLowerCase();
+      const agentName = (profile.full_name || '').trim().toLowerCase();
+      const agentEmail = (profile.email || '').trim().toLowerCase();
+
+      list = list.filter((c) => {
+        const cId = (c.agente_id || '').trim().toLowerCase();
+        const cName = (c.agente_nombre || '').trim().toLowerCase();
+        const fName = (c.file_name || '').toLowerCase();
+
+        return (
+          (agentId && cId === agentId) ||
+          (agentName && (cName === agentName || cName.includes(agentName) || agentName.includes(cName))) ||
+          (agentEmail && fName.includes(agentEmail)) ||
+          (agentId && fName.includes(agentId))
+        );
+      });
+    }
+
+    if (selectedCohort === 'all') return list;
     if (selectedCohort === 'nido_movil') {
-      return calls.filter((c) => /móvil|postpago|prepago/i.test(c.cola_atencion) || /postpago/i.test(c.motivo_nombre));
+      return list.filter((c) => /móvil|postpago|prepago/i.test(c.cola_atencion) || /postpago/i.test(c.motivo_nombre));
     }
     if (selectedCohort === 'nido_fibra') {
-      return calls.filter((c) => /hogar|fibra|fija|internet/i.test(c.cola_atencion) || /fibra|hfc/i.test(c.motivo_nombre));
+      return list.filter((c) => /hogar|fibra|fija|internet/i.test(c.cola_atencion) || /fibra|hfc/i.test(c.motivo_nombre));
     }
     if (selectedCohort === 'nido_retenciones') {
-      return calls.filter((c) => /retencion|baja|churn/i.test(c.cola_atencion) || /baja|renuncia|portabilidad/i.test(c.motivo_nombre));
+      return list.filter((c) => /retencion|baja|churn/i.test(c.cola_atencion) || /baja|renuncia|portabilidad/i.test(c.motivo_nombre));
     }
     if (selectedCohort === 'graduados') {
-      return calls.filter((c) => c.diagnostico_ojt?.nivel_madurez === 'LISTO_PRODUCCION');
+      return list.filter((c) => c.diagnostico_ojt?.nivel_madurez === 'LISTO_PRODUCCION');
     }
-    return calls;
-  }, [calls, selectedCohort]);
+    return list;
+  }, [calls, selectedCohort, profile]);
 
   // Google Sheets state
   const [connectedSpreadsheet, setConnectedSpreadsheet] = useState<SpreadsheetInfo | null>(() => {

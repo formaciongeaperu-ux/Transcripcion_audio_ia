@@ -13,6 +13,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { CallRecord, UploadItem } from '../types';
+import { useAuth } from '../contexts/AuthContext';
 import { normalizeAudioForPlayback } from '../utils/telephonyAudio';
 import { analyzeUploadedCall } from '../services/analyzeCall';
 
@@ -29,13 +30,19 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   onCallsProcessed,
   onAddToDeferredQueue,
 }) => {
+  const { profile } = useAuth();
   const [items, setItems] = useState<UploadItem[]>([]);
   const [concurrency, setConcurrency] = useState<number>(1);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [overallProgress, setOverallProgress] = useState<number>(0);
-  const [agentName, setAgentName] = useState('Camila Navarro V.');
-  const [agentId, setAgentId] = useState('AGT-4821');
+  const [agentName, setAgentName] = useState(() => profile?.full_name || 'Camila Navarro V.');
+  const [agentId, setAgentId] = useState(() => profile?.agent_id || 'AGT-4821');
   const [queueName, setQueueName] = useState('Exclusivo Postpago Chile');
+
+  React.useEffect(() => {
+    if (profile?.full_name) setAgentName(profile.full_name);
+    if (profile?.agent_id) setAgentId(profile.agent_id);
+  }, [profile]);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -317,7 +324,10 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                   );
                 }}
                 placeholder="Ej. AGT-4821 o 18432110-K"
-                className="mt-1 h-9 w-full rounded-xl border border-[#DADCE0] bg-white px-3 font-mono text-xs font-semibold text-[#202124] outline-none transition focus:border-[#1A73E8] focus:ring-1 focus:ring-[#1A73E8]"
+                readOnly={profile?.role === 'agent'}
+                className={`mt-1 h-9 w-full rounded-xl border border-[#DADCE0] px-3 font-mono text-xs font-semibold text-[#202124] outline-none transition focus:border-[#1A73E8] focus:ring-1 focus:ring-[#1A73E8] ${
+                  profile?.role === 'agent' ? 'bg-[#F1F3F4] text-[#5F6368] cursor-not-allowed' : 'bg-white'
+                }`}
               />
             </div>
             <div>
@@ -325,6 +335,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
               <input
                 type="text"
                 value={agentName}
+                readOnly={profile?.role === 'agent'}
                 onChange={(e) => {
                   const val = e.target.value;
                   setAgentName(val);
@@ -333,7 +344,9 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                   );
                 }}
                 placeholder="Ej. Camila Navarro V."
-                className="mt-1 h-9 w-full rounded-xl border border-[#DADCE0] bg-white px-3 text-xs text-[#202124] outline-none transition focus:border-[#1A73E8] focus:ring-1 focus:ring-[#1A73E8]"
+                className={`mt-1 h-9 w-full rounded-xl border border-[#DADCE0] px-3 text-xs text-[#202124] outline-none transition focus:border-[#1A73E8] focus:ring-1 focus:ring-[#1A73E8] ${
+                  profile?.role === 'agent' ? 'bg-[#F1F3F4] text-[#5F6368] cursor-not-allowed' : 'bg-white'
+                }`}
               />
             </div>
             <div>

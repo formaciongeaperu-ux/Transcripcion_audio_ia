@@ -1,3 +1,4 @@
+import { createClient } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { CallRecord, UserProfile, UserRole } from '../types';
 
@@ -328,6 +329,62 @@ export async function updateUserProfileRole(
 
     if (error) {
       return { success: false, error: new Error(error.message) };
+    }
+
+    return { success: true, error: null };
+  } catch (err: any) {
+    return { success: false, error: err };
+  }
+}
+
+/**
+ * Registra un nuevo usuario en Supabase (Auth + Profiles) sin cerrar la sesión del Administrador
+ */
+export async function createAdminUser(params: {
+  email: string;
+  password: string;
+  fullName: string;
+  role: UserRole;
+  agentId?: string;
+  campana?: string;
+}): Promise<{ success: boolean; error: Error | null }> {
+  try {
+    const supabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL || 'https://givdlqjfnctxvarpybht.supabase.co';
+    const supabaseAnonKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || 'sb_publishable_nNtMZhvN0uPRz4QzVnUyPQ_Rs4yyI0D';
+
+    // Cliente temporal sin persistencia de sesión para no desloguear al Admin
+    const tempClient = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: { persistSession: false, autoRefreshToken: false }
+    });
+
+    const { data, error } = await tempClient.auth.signUp({
+      email: params.email.trim(),
+      password: params.password,
+      options: {
+        data: {
+          full_name: params.fullName.trim(),
+          role: params.role,
+          agent_id: (params.agentId || '').trim(),
+          campana: params.campana || 'Claro Chile'
+        }
+      }
+    });
+
+    if (error) {
+      return { success: false, error: new Error(error.message) };
+    }
+
+    if (data.user) {
+      const profilePayload = {
+        id: data.user.id,
+        email: params.email.trim(),
+        full_name: params.fullName.trim(),
+        role: params.role,
+        agent_id: (params.agentId || '').trim(),
+        campana: params.campana || 'Claro Chile',
+        created_at: new Date().toISOString()
+      };
+      await supabase.from('profiles').upsert(profilePayload);
     }
 
     return { success: true, error: null };

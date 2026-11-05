@@ -1,4 +1,5 @@
 import React from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import { 
   LayoutDashboard, 
   ListFilter, 
@@ -94,6 +95,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
   ];
 
+  const { profile } = useAuth();
+  const isAgent = profile?.role === 'agent';
+  const isAdmin = profile?.role === 'super_admin';
+
+  const visibleNavItems = navItems.filter((item) => {
+    if (isAgent && (item.id === 'calibration' || item.id === 'users')) return false;
+    if (!isAdmin && item.id === 'users') return false;
+    return true;
+  });
+
   return (
     <aside
       className={`fixed inset-y-0 left-0 z-20 flex flex-col border-r border-[#DADCE0] bg-white pt-16 transition-all duration-300 md:static ${
@@ -108,7 +119,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </p>
         </div>
 
-        {navItems.map((item) => {
+        {visibleNavItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
           return (
