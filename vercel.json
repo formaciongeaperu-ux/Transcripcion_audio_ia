@@ -15,7 +15,6 @@
     }
   },
   "rewrites": [
-    { "source": "/api/ingest-call", "destination": "/api/ingest-call.js" },
     {
       "source": "/((?!api/).*)",
       "destination": "/index.html"
