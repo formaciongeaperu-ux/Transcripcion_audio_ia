@@ -734,9 +734,13 @@ async function handleRawAudioAnalyze(req: express.Request, res: express.Response
 }
 
 // Ingest call endpoint for automated pipelines (n8n / Google Drive / WhatsApp)
-app.all('/api/ingest-call', async (req, res) => {
-  return ingestCallHandler(req, res);
-});
+app.all(
+  '/api/ingest-call',
+  express.raw({ limit: '100mb', type: ['audio/*', 'application/octet-stream', 'multipart/form-data'] }),
+  async (req, res) => {
+    return ingestCallHandler(req, res);
+  }
+);
 
 // Analyze call endpoint with Level 1 cascade & exponential backoff
 app.post('/api/analyze-call', async (req, res) => {
