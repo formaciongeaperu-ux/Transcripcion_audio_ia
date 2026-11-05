@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx server.ts",
     "postinstall": "node scripts/copy-ffmpeg.mjs",
-    "build": "node scripts/copy-ffmpeg.mjs && vite build && esbuild web/longAudioRoute.ts --bundle --platform=node --format=esm --packages=external --outfile=api/long-audio.js && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build": "node scripts/copy-ffmpeg.mjs && vite build && esbuild web/longAudioRoute.ts --bundle --platform=node --format=esm --packages=external --outfile=api/long-audio.js && esbuild api/calibration/index.ts --bundle --platform=node --format=esm --packages=external --outfile=api/calibration.js && esbuild api/calibration/chat.ts --bundle --platform=node --format=esm --packages=external --outfile=api/calibration-chat.js && esbuild api/calibration/reset.ts --bundle --platform=node --format=esm --packages=external --outfile=api/calibration-reset.js && esbuild api/ingest-call.ts --bundle --platform=node --format=esm --packages=external --outfile=api/ingest-call.js && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",

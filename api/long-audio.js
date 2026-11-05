@@ -1152,6 +1152,26 @@ async function readBlob() {
   return raw ? normalize(JSON.parse(raw)) : null;
 }
 async function readCalibration() {
+  if (!process.env.VERCEL) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3500);
+      const webRes = await fetch("https://transcripcion-audio-ia.vercel.app/api/calibration", { signal: controller.signal });
+      clearTimeout(timeout);
+      if (webRes.ok) {
+        const json = await webRes.json();
+        if (json?.data?.customDirectives) {
+          const synced = normalize(json.data);
+          try {
+            fs3.writeFileSync(path3.join(process.cwd(), "calibration.json"), JSON.stringify(synced, null, 2), "utf8");
+          } catch {
+          }
+          return synced;
+        }
+      }
+    } catch {
+    }
+  }
   try {
     const stored = await readBlob();
     if (stored) return stored;

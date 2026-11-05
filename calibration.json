@@ -1,0 +1,11 @@
+{
+  "customDirectives": "# DIRECTIVAS ADICIONALES DE CALIBRACIÓN ACTIVA (OPERACIÓN CLARO CHILE)\n# Estas directivas tienen prioridad y adaptan el juicio del motor de IA para la operación diaria.\n\n1. TOLERANCIA A PAUSAS EN SISTEMAS INTERNOS (SOMOS CLAVE / CRM):\n- Si el asesor pide tiempo para validar en el sistema (\"Permítame un momento mientras abro el sistema\", \"Deme un instante en línea\"), no penalizar la nota de tiempos de espera si retoma el contacto dentro de 60 segundos.\n- Considerar estas pausas como oportunidad formativa de agilidad, nunca como desidia o negligencia.\n\n2. ATENCIÓN DE CLIENTES DETRACTORES POR COBROS O CAÍDA DE SEÑAL:\n- Si el cliente ingresa enfurecido por fallas de facturación o caída masiva de red, evaluar el 'score_agente' independientemente de la queja hacia Claro. Si el asesor mantuvo la calma y empatizó, su nota de amabilidad debe ser >= 85.\n\n3. REGLA DE CIERRE Y ENCUESTA DE SERVICIO:\n- Si el cliente apura la despedida diciendo \"muchas gracias, que esté bien\" e interrumpe antes de que el asesor termine de explicar la escala 0-10, calificar 'cierre.esperar_confirmacion_cliente' como cumplido y no castigar severamente el cumplimiento global.",
+  "sensitivitySettings": {
+    "silenceToleranceSeconds": 30,
+    "detractorStrictness": "equilibrada",
+    "chileanSlangTolerance": true,
+    "ojtPedagogicalFocus": true
+  },
+  "version": "v1.3.0",
+  "updatedAt": "2026-11-05T15:55:27.392Z"
+}

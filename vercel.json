@@ -15,6 +15,10 @@
     }
   },
   "rewrites": [
+    { "source": "/api/calibration", "destination": "/api/calibration.js" },
+    { "source": "/api/calibration/chat", "destination": "/api/calibration-chat.js" },
+    { "source": "/api/calibration/reset", "destination": "/api/calibration-reset.js" },
+    { "source": "/api/ingest-call", "destination": "/api/ingest-call.js" },
     {
       "source": "/((?!api/).*)",
       "destination": "/index.html"
