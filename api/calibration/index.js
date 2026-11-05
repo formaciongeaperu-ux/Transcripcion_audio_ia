@@ -508,7 +508,7 @@ async function writeCalibration(customDirectives, sensitivitySettings) {
   return next;
 }
 
-// api/calibration/index.ts
+// api-src/calibration/index.ts
 function send(res, status, payload) {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json");

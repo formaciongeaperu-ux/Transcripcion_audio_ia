@@ -1,4 +1,4 @@
-// api/calibration/chat.ts
+// api-src/calibration/chat.ts
 import { GoogleGenAI } from "@google/genai";
 
 // calibrationStore.ts
@@ -308,7 +308,7 @@ function readRequestJson(req) {
   });
 }
 
-// api/calibration/chat.ts
+// api-src/calibration/chat.ts
 function getApiKeys() {
   const keys = [];
   if (process.env.GEMINI_API_KEYS) {
