@@ -7,6 +7,7 @@ import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { AnalysisError, analyzeLongAudio, resolveFfmpeg } from './longAudioAnalysis.ts';
+import ingestCallHandler from './api/ingest-call.ts';
 import {
   DEFAULT_BASE_PROMPT,
   DEFAULT_CUSTOM_DIRECTIVES,
@@ -731,6 +732,11 @@ async function handleRawAudioAnalyze(req: express.Request, res: express.Response
     fs.promises.unlink(tmp).catch(() => {});
   }
 }
+
+// Ingest call endpoint for automated pipelines (n8n / Google Drive / WhatsApp)
+app.all('/api/ingest-call', async (req, res) => {
+  return ingestCallHandler(req, res);
+});
 
 // Analyze call endpoint with Level 1 cascade & exponential backoff
 app.post('/api/analyze-call', async (req, res) => {
