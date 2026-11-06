@@ -742,6 +742,63 @@ app.all(
   }
 );
 
+// Neural Network & Autonomous AI Agent Endpoints (Python MLP + Supabase Vector RAG)
+app.get('/api/neural-agent/report', async (_req, res) => {
+  try {
+    const reportPath = path.join(process.cwd(), 'models', 'neural_training_report.json');
+    if (fs.existsSync(reportPath)) {
+      const raw = await fs.promises.readFile(reportPath, 'utf-8');
+      return res.json(JSON.parse(raw));
+    }
+    execFile('python', ['ai_neural_agent.py', 'train'], { cwd: process.cwd(), maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
+      if (err) {
+        return res.status(500).json({ success: false, error: err.message });
+      }
+      try {
+        return res.json(JSON.parse(stdout));
+      } catch (e: any) {
+        return res.status(500).json({ success: false, error: e?.message || 'Error al parsear salida de Python' });
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Error al leer reporte neuronal' });
+  }
+});
+
+app.post('/api/neural-agent/train', async (_req, res) => {
+  execFile('python', ['ai_neural_agent.py', 'train'], { cwd: process.cwd(), maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+    if (err) {
+      return res.status(500).json({ success: false, error: stderr || err.message });
+    }
+    try {
+      return res.json(JSON.parse(stdout));
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: e?.message || 'Error al parsear entrenamiento' });
+    }
+  });
+});
+
+app.post('/api/neural-agent/predict', async (req, res) => {
+  try {
+    const child = execFile('python', ['ai_neural_agent.py', 'predict'], { cwd: process.cwd(), maxBuffer: 5 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) {
+        return res.status(500).json({ success: false, error: stderr || err.message });
+      }
+      try {
+        return res.json(JSON.parse(stdout));
+      } catch (e: any) {
+        return res.status(500).json({ success: false, error: e?.message || 'Error en predicción neuronal' });
+      }
+    });
+    if (child.stdin) {
+      child.stdin.write(JSON.stringify(req.body || {}));
+      child.stdin.end();
+    }
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message });
+  }
+});
+
 // Analyze call endpoint with Level 1 cascade & exponential backoff
 app.post('/api/analyze-call', async (req, res) => {
   const contentType = String(req.headers['content-type'] || '');
@@ -1217,6 +1274,7 @@ async function startServer() {
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
+        allowedHosts: true,
         hmr: { port: Number(process.env.HMR_PORT) || 24678 },
       },
       appType: 'spa',

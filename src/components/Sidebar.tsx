@@ -12,12 +12,13 @@ import {
   ChevronRight,
   TrendingUp,
   Cpu,
+  Brain,
   SlidersHorizontal,
   Users,
   ShieldCheck
 } from 'lucide-react';
 
-export type TabType = 'dashboard' | 'explorer' | 'audit' | 'queue' | 'calibration' | 'users';
+export type TabType = 'dashboard' | 'operations' | 'explorer' | 'audit' | 'neural' | 'queue' | 'calibration' | 'users';
 
 interface SidebarProps {
   activeTab: TabType;
@@ -57,6 +58,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badge: null,
     },
     {
+      id: 'operations' as TabType,
+      label: 'Mesa de Operaciones & Churn',
+      sublabel: 'Causa raíz & Detractores',
+      icon: ShieldAlert,
+      badge: 'Ops',
+      badgeColor: 'bg-red-100 text-red-700',
+    },
+    {
       id: 'explorer' as TabType,
       label: 'Explorador de Llamadas',
       sublabel: `${totalCalls} grabaciones`,
@@ -69,6 +78,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
       sublabel: 'Reproductor & NPS Claro',
       icon: Headphones,
       badge: null,
+    },
+    {
+      id: 'neural' as TabType,
+      label: 'Red Neuronal & Agente IA',
+      sublabel: 'Predicción MLP + RAG',
+      icon: Brain,
+      badge: 'Python',
+      badgeColor: 'bg-[#072242] text-white',
     },
     {
       id: 'queue' as TabType,
@@ -98,10 +115,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const { profile } = useAuth();
   const isAgent = profile?.role === 'agent';
   const isAdmin = profile?.role === 'super_admin';
+  const isOperations = profile?.role === 'operaciones';
 
   const visibleNavItems = navItems.filter((item) => {
-    if (isAgent && (item.id === 'calibration' || item.id === 'users')) return false;
-    if (!isAdmin && item.id === 'users') return false;
+    if (isAgent && (item.id === 'calibration' || item.id === 'users' || item.id === 'operations' || item.id === 'neural')) return false;
+    if (!isAdmin && (item.id === 'users' || item.id === 'neural')) return false;
+    if (isOperations && (item.id === 'dashboard' || item.id === 'calibration' || item.id === 'neural')) return false;
+    if (!isOperations && !isAdmin && item.id === 'operations') return false;
     return true;
   });
 

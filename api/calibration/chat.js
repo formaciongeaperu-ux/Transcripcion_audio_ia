@@ -237,6 +237,50 @@ var callAnalysisSchema = {
     alertas: { type: Type.ARRAY, items: { type: Type.STRING } },
     csat_estimado: { type: Type.NUMBER, description: "1 a 5" },
     resolucion_primer_contacto: { type: Type.BOOLEAN },
+    diagnostico_operaciones: {
+      type: Type.OBJECT,
+      description: "Diagn\xF3stico para el \xE1rea de Operaciones enfocado en la causa ra\xEDz de detracci\xF3n, riesgo de churn y plan de acci\xF3n operativo.",
+      properties: {
+        es_detractor: { type: Type.BOOLEAN, description: "True si el cliente es detractor (tNPS 0-6) o expresa molestia/insatisfacci\xF3n" },
+        causa_raiz_categoria: {
+          type: Type.STRING,
+          description: "Categoria de dolor: falla_servicio_red | facturacion_cobranza | logistica_terreno | friccion_procesos | llamada_reiterada | atencion_asesor | consulta_informativa | otro"
+        },
+        causa_raiz_nombre: { type: Type.STRING, description: 'Nombre corto del dolor operativo (ej: "Cobro indebido de roaming", "Corte de fibra \xF3ptica sin visita", "Reiteraci\xF3n por 3ra vez")' },
+        causa_raiz_detalle: { type: Type.STRING, description: "Explicaci\xF3n detallada de por qu\xE9 el cliente lleg\xF3 molesto o se convirti\xF3 en detractor" },
+        responsabilidad: {
+          type: Type.STRING,
+          description: "Responsabilidad principal: claro_empresa | asesor | compartida | externa_cliente"
+        },
+        responsabilidad_justificacion: { type: Type.STRING, description: "Justificaci\xF3n de desacoplamiento: si es falla t\xE9cnica/proceso de Claro o error de atenci\xF3n del asesor" },
+        riesgo_churn: { type: Type.STRING, description: "Riesgo de cancelaci\xF3n/portabilidad: critico | medio | bajo" },
+        amenaza_subtel_sernac: { type: Type.BOOLEAN, description: "True si el cliente menciona reclamo en SUBTEL, SERNAC, demanda o portabilidad inmediata" },
+        llamada_reiterada: { type: Type.BOOLEAN, description: "True si el cliente indica que ya llam\xF3 antes por el mismo problema sin soluci\xF3n" },
+        citas_quiebre_cliente: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+          description: "1 a 3 frases textuales del cliente donde verbaliza su frustraci\xF3n o el motivo de reclamo"
+        },
+        plan_accion_cliente: { type: Type.STRING, description: "Acci\xF3n operativa inmediata con el cliente (ej: ajuste en facturaci\xF3n, visita t\xE9cnica prioritaria, llamado de retenci\xF3n)" },
+        plan_accion_proceso: { type: Type.STRING, description: "Acci\xF3n de mejora correctiva en procesos/sistemas Claro para evitar que vuelva a ocurrir" },
+        area_responsable: { type: Type.STRING, description: "\xC1rea operativa responsable: Redes/Soporte T\xE9cnico | Facturaci\xF3n | Log\xEDstica/Terreno | Retenciones | Atenci\xF3n al Cliente" }
+      },
+      required: [
+        "es_detractor",
+        "causa_raiz_categoria",
+        "causa_raiz_nombre",
+        "causa_raiz_detalle",
+        "responsabilidad",
+        "responsabilidad_justificacion",
+        "riesgo_churn",
+        "amenaza_subtel_sernac",
+        "llamada_reiterada",
+        "citas_quiebre_cliente",
+        "plan_accion_cliente",
+        "plan_accion_proceso",
+        "area_responsable"
+      ]
+    },
     agente_nombre_detectado: { type: Type.STRING, description: "Nombre real del asesor que atiende la llamada" },
     cliente_nombre_detectado: { type: Type.STRING, description: 'Nombre real del cliente mencionado en la llamada (o "Cliente Claro" si no se dice)' },
     segmentos: {

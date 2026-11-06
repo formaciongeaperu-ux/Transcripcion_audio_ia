@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { CallRecord, getNormalizedNPS } from '../types';
 import { OjtDiagnosisCard } from './OjtDiagnosisCard';
+import { useAuth } from '../contexts/AuthContext';
 
 interface CallsExplorerViewProps {
   calls: CallRecord[];
@@ -32,6 +33,9 @@ export const CallsExplorerView: React.FC<CallsExplorerViewProps> = ({
   onOpenUpload,
   onExportFiltered,
 }) => {
+  const { profile } = useAuth();
+  const isOperaciones = profile?.role === 'operaciones';
+
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedQueue, setSelectedQueue] = useState('all');
   const [selectedSentiment, setSelectedSentiment] = useState('all');
@@ -41,8 +45,10 @@ export const CallsExplorerView: React.FC<CallsExplorerViewProps> = ({
   const [sortField, setSortField] = useState<'fecha' | 'qa' | 'nps' | 'silencio'>('fecha');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   
-  // Quick status filter chips
-  const [quickFilter, setQuickFilter] = useState<'all' | 'tutor' | 'quiebres' | 'detractor' | 'promotor' | 'listo'>('all');
+  // Quick status filter chips (Operaciones defaults to focus on detractors)
+  const [quickFilter, setQuickFilter] = useState<'all' | 'tutor' | 'quiebres' | 'detractor' | 'promotor' | 'listo'>(
+    isOperaciones ? 'detractor' : 'all'
+  );
 
   // Slide-over preview drawer state
   const [previewCall, setPreviewCall] = useState<CallRecord | null>(null);
@@ -135,13 +141,18 @@ export const CallsExplorerView: React.FC<CallsExplorerViewProps> = ({
       {/* Title & Action Bar */}
       <div className="flex flex-wrap items-center justify-between gap-4 rounded-3xl border border-[#DADCE0] bg-white p-6 shadow-sm">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h1 className="font-['Google_Sans',sans-serif] text-2xl font-bold tracking-tight text-[#202124]">
               Explorador de Grabaciones & Auditorías
             </h1>
             <span className="rounded-full bg-[#E8F0FE] px-2.5 py-0.5 text-xs font-bold text-[#1A73E8]">
               {filteredCalls.length} registros
             </span>
+            {isOperaciones && (
+              <span className="rounded-full bg-red-100 border border-red-300 text-red-800 text-[11px] font-bold px-2.5 py-0.5 shadow-2xs">
+                ⚙️ Mesa Operativa: Foco en Causa Raíz & Fuga
+              </span>
+            )}
           </div>
           <p className="mt-1 text-xs text-[#5F6368]">
             Panel de supervisión y monitoreo continuo de calidad acústica y desempeño formativo OJT.
@@ -208,13 +219,13 @@ export const CallsExplorerView: React.FC<CallsExplorerViewProps> = ({
 
         <button
           onClick={() => setQuickFilter('detractor')}
-          className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
+          className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
             quickFilter === 'detractor'
               ? 'bg-[#EA4335] text-white shadow-xs'
-              : 'border border-[#DADCE0] bg-white text-[#EA4335] hover:bg-[#FCE8E6]'
+              : 'border border-[#FCE8E6] bg-[#FCE8E6]/60 text-[#C5221F] hover:bg-[#FCE8E6]'
           }`}
         >
-          Detractores tNPS ({detractorCount})
+          <span>🚨 Detractores & Causa Raíz ({detractorCount})</span>
         </button>
 
         <button
@@ -656,9 +667,7 @@ export const CallsExplorerView: React.FC<CallsExplorerViewProps> = ({
             </div>
 
             {/* OJT Diagnosis snippet */}
-            {previewCall.diagnostico_ojt && (
-              <OjtDiagnosisCard diagnostico={previewCall.diagnostico_ojt} />
-            )}
+            <OjtDiagnosisCard call={previewCall} />
 
             {/* Action button to open full audit */}
             <button

@@ -169,6 +169,12 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
           icon: Award,
           label: 'Auditor QA'
         };
+      case 'operaciones':
+        return {
+          badge: 'bg-[#FCE8E6] text-[#C5221F] border-[#FAD2CF]',
+          icon: AlertCircle,
+          label: 'Operaciones (Causa Raíz)'
+        };
       case 'agent':
       default:
         return {
@@ -371,6 +377,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
                   className="w-full rounded-lg border border-[#DADCE0] bg-white py-1.5 px-3 text-xs font-semibold text-[#202124] focus:border-[#1A73E8] focus:outline-hidden"
                 >
                   <option value="agent">🎧 Asesor (Solo ve sus propias llamadas)</option>
+                  <option value="operaciones">⚙️ Operaciones (Causa Raíz y Detractores)</option>
                   <option value="supervisor">👥 Supervisor (Ve llamadas de su equipo)</option>
                   <option value="qa_auditor">🎖️ Auditor QA (Calidad y pautas)</option>
                   <option value="super_admin">🛡️ Super Administrador (Control total)</option>
@@ -476,6 +483,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
                           }`}
                         >
                           <option value="super_admin">Super Administrador</option>
+                          <option value="operaciones">Operaciones (Causa Raíz)</option>
                           <option value="supervisor">Supervisor / Team Leader</option>
                           <option value="qa_auditor">Auditor QA</option>
                           <option value="agent">Asesor / Agente</option>

@@ -254,11 +254,20 @@ export const UploadModal: React.FC<UploadModalProps> = ({
               <UploadCloud className="h-5 w-5" />
             </div>
             <div>
-              <h2 className="font-['Google_Sans',sans-serif] text-base font-bold text-[#202124]">
-                Carga Masiva de Grabaciones
-              </h2>
+              <div className="flex items-center gap-2">
+                <h2 className="font-['Google_Sans',sans-serif] text-base font-bold text-[#202124]">
+                  Carga Masiva de Grabaciones
+                </h2>
+                {profile?.role === 'operaciones' && (
+                  <span className="rounded-full bg-red-100 px-2.5 py-0.5 text-[11px] font-bold text-red-700">
+                    Mesa de Operaciones (operaciones_call_records)
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-[#5F6368]">
-                En el sitio, el audio se sube completo y se transcribe por tramos sin recortar el diálogo
+                {profile?.role === 'operaciones'
+                  ? 'Los audios cargados aquí se almacenan exclusivamente en la tabla de Operaciones para análisis de causa raíz y mitigación de churn.'
+                  : 'En el sitio, el audio se sube completo y se transcribe por tramos sin recortar el diálogo.'}
               </p>
             </div>
           </div>

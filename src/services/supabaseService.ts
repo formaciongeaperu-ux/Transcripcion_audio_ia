@@ -75,6 +75,27 @@ export function mapDbToCallRecord(row: any): CallRecord {
       camino_a_promotor: ''
     },
     diagnostico_ojt: row.diagnostico_ojt,
+    diagnostico_operaciones: row.diagnostico_operaciones || (row.causa_raiz_categoria ? {
+      es_detractor: (row.nps_pronostico?.score ?? 10) <= 6 || row.nps_pronostico?.clasificacion === 'DETRACTOR',
+      causa_raiz_categoria: row.causa_raiz_categoria,
+      causa_raiz_nombre: row.causa_raiz_nombre || 'Causa Raíz Operaciones',
+      causa_raiz_detalle: row.causa_raiz_detalle || row.resumen || '',
+      responsabilidad: row.responsabilidad || 'claro_empresa',
+      responsabilidad_justificacion: row.responsabilidad_justificacion || '',
+      riesgo_churn: row.riesgo_churn || 'medio',
+      amenaza_subtel_sernac: Boolean(row.amenaza_subtel_sernac),
+      llamada_reiterada: Boolean(row.llamada_reiterada),
+      citas_quiebre_cliente: Array.isArray(row.citas_quiebre_cliente) ? row.citas_quiebre_cliente : [],
+      plan_accion_cliente: row.plan_accion_cliente || '',
+      plan_accion_proceso: row.plan_accion_proceso || '',
+      area_responsable: row.area_responsable || 'Operaciones'
+    } : (row.nps_pronostico?.diagnostico_operaciones || undefined)),
+    estado_gestion: row.estado_gestion || 'pendiente',
+    accion_inmediata: row.accion_inmediata || '',
+    responsable_operaciones: row.responsable_operaciones || '',
+    resultado_fidelizacion: row.resultado_fidelizacion || '',
+    comentarios_seguimiento: row.comentarios_seguimiento || '',
+    fecha_gestion: row.fecha_gestion || undefined,
     silencio_analisis: row.silencio_analisis || {
       duracion_total_segundos: row.duracion_segundos || 0,
       tiempo_silencio_segundos: 0,
@@ -105,9 +126,13 @@ export function mapDbToCallRecord(row: any): CallRecord {
 }
 
 /**
- * Transforma un CallRecord a los campos de la tabla call_records en Supabase
+ * Transforma un CallRecord a los campos de la tabla en Supabase (call_records u operaciones_call_records)
  */
-export function mapCallRecordToDb(record: CallRecord, userId?: string) {
+export function mapCallRecordToDb(
+  record: CallRecord, 
+  userId?: string, 
+  targetTable: 'call_records' | 'operaciones_call_records' = 'call_records'
+) {
   // Limpiamos referencias pesadas o campos transitorios de cliente (como audioFile File object)
   const segmentosClean = (record.segmentos || []).map(seg => ({
     id: seg.id,
@@ -117,6 +142,58 @@ export function mapCallRecordToDb(record: CallRecord, userId?: string) {
     texto: seg.texto,
     sentimientoScore: seg.sentimientoScore
   }));
+
+  if (targetTable === 'operaciones_call_records') {
+    // Si el ID generado no es un UUID válido (ej: 'call-1793...'), garantizamos un UUID válido para Supabase
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(record.id);
+    const validId = isUuid
+      ? record.id
+      : (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : record.id);
+    record.id = validId;
+
+    return {
+      id: validId,
+      codigo_llamada: record.codigo_llamada || `CALL-${validId.slice(-6)}`,
+      fecha_hora: record.fecha_hora || new Date().toISOString(),
+      agente_nombre: record.agente_nombre || 'Asesor Claro',
+      agente_id: record.agente_id || 'AG-000',
+      cliente_nombre: record.cliente_nombre || 'Cliente Claro',
+      cliente_telefono: record.cliente_telefono || '+56 9 **** ****',
+      cola_atencion: record.cola_atencion || 'Atención General Claro',
+      duracion_total: record.duracion_total || '00:00',
+      duracion_segundos: Math.round(Number(record.duracion_segundos) || 0),
+      qa_score_global: Math.round(Number(record.qa_score_global) || 0),
+      csat_estimado: Math.round(Number(record.csat_estimado) || 4),
+      nps_pronostico: record.nps_pronostico,
+      resolucion_primer_contacto: record.resolucion_primer_contacto ?? true,
+      sentimiento_score: Number.isFinite(Number(record.sentimiento_score)) ? Number(record.sentimiento_score) : 0,
+      sentimiento_label: record.sentimiento_label || 'Neutro',
+      resumen: record.resumen || '',
+      motivo_categoria: record.motivo_categoria || 'soporte',
+      motivo_nombre: record.motivo_nombre || 'Consulta General',
+      causa_raiz_categoria: record.diagnostico_operaciones?.causa_raiz_categoria || 'falla_servicio_red',
+      causa_raiz_nombre: record.diagnostico_operaciones?.causa_raiz_nombre || 'Falla Técnica / Red & Fibra',
+      causa_raiz_detalle: record.diagnostico_operaciones?.causa_raiz_detalle || record.resumen || '',
+      responsabilidad: record.diagnostico_operaciones?.responsabilidad || 'claro_empresa',
+      responsabilidad_justificacion: record.diagnostico_operaciones?.responsabilidad_justificacion || '',
+      riesgo_churn: record.diagnostico_operaciones?.riesgo_churn || 'medio',
+      amenaza_subtel_sernac: Boolean(record.diagnostico_operaciones?.amenaza_subtel_sernac),
+      llamada_reiterada: Boolean(record.diagnostico_operaciones?.llamada_reiterada),
+      citas_quiebre_cliente: record.diagnostico_operaciones?.citas_quiebre_cliente || [],
+      estado_gestion: record.estado_gestion || 'pendiente',
+      accion_inmediata: record.accion_inmediata || null,
+      responsable_operaciones: record.responsable_operaciones || null,
+      resultado_fidelizacion: record.resultado_fidelizacion || null,
+      comentarios_seguimiento: record.comentarios_seguimiento || null,
+      fecha_gestion: record.fecha_gestion || null,
+      segmentos: segmentosClean,
+      alertas: record.alertas || [],
+      quiebres_atencion: record.quiebres_atencion || [],
+      file_name: record.file_name || null,
+      ...(userId ? { user_id: userId } : {}),
+      updated_at: new Date().toISOString()
+    };
+  }
 
   return {
     id: record.id,
@@ -139,8 +216,11 @@ export function mapCallRecordToDb(record: CallRecord, userId?: string) {
     resolucion_primer_contacto: record.resolucion_primer_contacto ?? true,
     evaluacion_criterios: record.evaluacion_criterios,
     cumplimiento_guion: record.cumplimiento_guion,
-    nps_pronostico: record.nps_pronostico,
+    nps_pronostico: record.diagnostico_operaciones
+      ? { ...record.nps_pronostico, diagnostico_operaciones: record.diagnostico_operaciones }
+      : record.nps_pronostico,
     diagnostico_ojt: record.diagnostico_ojt || null,
+    diagnostico_operaciones: record.diagnostico_operaciones || null,
     silencio_analisis: record.silencio_analisis,
     quiebres_atencion: record.quiebres_atencion || [],
     feedback_coaching: record.feedback_coaching,
@@ -159,39 +239,139 @@ export function mapCallRecordToDb(record: CallRecord, userId?: string) {
 }
 
 /**
- * Obtiene todas las llamadas almacenadas en Supabase
+ * Columnas ligeras para el listado y métricas (excluye `segmentos` y matrices pesadas para reducir 99% el Egress)
+ */
+export const CALL_RECORDS_LIST_COLUMNS = [
+  'id',
+  'codigo_llamada',
+  'fecha_hora',
+  'agente_nombre',
+  'agente_id',
+  'cliente_nombre',
+  'cliente_telefono',
+  'cola_atencion',
+  'duracion_total',
+  'duracion_segundos',
+  'qa_score_global',
+  'resumen',
+  'motivo_categoria',
+  'motivo_nombre',
+  'sentimiento_score',
+  'sentimiento_label',
+  'csat_estimado',
+  'resolucion_primer_contacto',
+  'nps_pronostico',
+  'diagnostico_ojt',
+  'file_name',
+  'file_size_kb',
+  'modelo_procesado',
+  'created_at',
+  'updated_at'
+].join(',');
+
+export const OPERACIONES_CALL_RECORDS_LIST_COLUMNS = [
+  'id',
+  'codigo_llamada',
+  'fecha_hora',
+  'agente_nombre',
+  'agente_id',
+  'cliente_nombre',
+  'cliente_telefono',
+  'cola_atencion',
+  'duracion_total',
+  'duracion_segundos',
+  'qa_score_global',
+  'resumen',
+  'motivo_categoria',
+  'motivo_nombre',
+  'sentimiento_score',
+  'sentimiento_label',
+  'csat_estimado',
+  'resolucion_primer_contacto',
+  'nps_pronostico',
+  'causa_raiz_categoria',
+  'causa_raiz_nombre',
+  'causa_raiz_detalle',
+  'responsabilidad',
+  'responsabilidad_justificacion',
+  'riesgo_churn',
+  'amenaza_subtel_sernac',
+  'llamada_reiterada',
+  'citas_quiebre_cliente',
+  'estado_gestion',
+  'accion_inmediata',
+  'responsable_operaciones',
+  'resultado_fidelizacion',
+  'comentarios_seguimiento',
+  'fecha_gestion',
+  'file_name',
+  'created_at',
+  'updated_at'
+].join(',');
+
+/**
+ * Obtiene todas las llamadas almacenadas en Supabase de forma incremental y ligera (Ultra-bajo Egress).
  */
 export interface FetchCallsOptions {
   since?: string;
   limit?: number;
+  targetTable?: 'call_records' | 'operaciones_call_records';
 }
 
-/**
- * Obtiene las llamadas almacenadas en Supabase de forma incremental optimizada.
- * Si se especifica `since`, solo descarga registros modificados después de esa fecha (reduce el Egress en un 95%).
- */
 export async function fetchCallRecordsFromSupabase(
   options?: FetchCallsOptions
 ): Promise<{ data: CallRecord[] | null; error: Error | null }> {
   try {
-    const limit = options?.limit ?? (options?.since ? 200 : 300);
-    let query = supabase
-      .from('call_records')
-      .select('*')
-      .order('fecha_hora', { ascending: false })
-      .limit(limit);
+    const targetTable = options?.targetTable || 'call_records';
+    const selectCols = targetTable === 'operaciones_call_records'
+      ? OPERACIONES_CALL_RECORDS_LIST_COLUMNS
+      : CALL_RECORDS_LIST_COLUMNS;
 
-    if (options?.since) {
-      query = query.gt('updated_at', options.since);
+    const maxRecords = options?.limit ?? (options?.since ? 1000 : 5000);
+    const pageSize = 1000;
+    let allRows: any[] = [];
+    let from = 0;
+
+    while (from < maxRecords) {
+      const to = Math.min(from + pageSize - 1, maxRecords - 1);
+      let query = supabase
+        .from(targetTable)
+        .select(selectCols)
+        .order('fecha_hora', { ascending: false })
+        .range(from, to);
+
+      if (options?.since) {
+        query = query.gt('updated_at', options.since);
+      }
+
+      const res = await query;
+      let pageRows: any[] = (res.data as any[]) || [];
+
+      if (res.error) {
+        console.warn(`[Supabase] Aviso en select de ${targetTable}, reintentando fallback:`, res.error.message);
+        let fallbackQuery = supabase
+          .from(targetTable)
+          .select('*')
+          .order('fecha_hora', { ascending: false })
+          .range(from, to);
+        if (options?.since) {
+          fallbackQuery = fallbackQuery.gt('updated_at', options.since);
+        }
+        const fallbackRes = await fallbackQuery;
+        if (fallbackRes.error) {
+          if (allRows.length > 0) break;
+          return { data: null, error: new Error(fallbackRes.error.message) };
+        }
+        pageRows = (fallbackRes.data as any[]) || [];
+      }
+
+      if (!pageRows || pageRows.length === 0) break;
+      allRows.push(...pageRows);
+      if (pageRows.length < (to - from + 1)) break;
+      from += pageSize;
     }
 
-    const { data, error } = await query;
-    if (error) {
-      console.error('[Supabase] Error al cargar call_records:', error);
-      return { data: null, error: new Error(error.message) };
-    }
-
-    return { data: (data || []).map(mapDbToCallRecord), error: null };
+    return { data: allRows.map(mapDbToCallRecord), error: null };
   } catch (err: any) {
     console.error('[Supabase] Excepción en fetchCallRecordsFromSupabase:', err);
     return { data: null, error: err };
@@ -199,10 +379,40 @@ export async function fetchCallRecordsFromSupabase(
 }
 
 /**
+ * Descarga bajo demanda el detalle COMPLETO de una única llamada (incluye transcripción 'segmentos' y guion).
+ * Se ejecuta únicamente cuando el usuario hace clic en una grabación específica, ahorrando el 99% de Egress.
+ */
+export async function fetchCallRecordDetailFromSupabase(
+  callId: string,
+  targetTable: 'call_records' | 'operaciones_call_records' = 'call_records'
+): Promise<{ data: CallRecord | null; error: Error | null }> {
+  try {
+    const { data, error } = await supabase
+      .from(targetTable)
+      .select('*')
+      .eq('id', callId)
+      .maybeSingle();
+
+    if (error) {
+      console.error(`[Supabase] Error al cargar detalle de llamada ${callId} (${targetTable}):`, error);
+      return { data: null, error: new Error(error.message) };
+    }
+    if (!data) return { data: null, error: null };
+    return { data: mapDbToCallRecord(data), error: null };
+  } catch (err: any) {
+    console.error(`[Supabase] Excepción en fetchCallRecordDetailFromSupabase:`, err);
+    return { data: null, error: err };
+  }
+}
+
+/**
  * Guarda o actualiza un registro de llamada en Supabase
  */
-async function writeCallRecord(payload: Record<string, unknown>): Promise<{ success: boolean; error: Error | null }> {
-  const inserted = await supabase.from('call_records').insert(payload);
+async function writeCallRecord(
+  payload: Record<string, unknown>,
+  targetTable: 'call_records' | 'operaciones_call_records' = 'call_records'
+): Promise<{ success: boolean; error: Error | null }> {
+  const inserted = await supabase.from(targetTable).insert(payload);
 
   if (!inserted.error) return { success: true, error: null };
 
@@ -210,25 +420,68 @@ async function writeCallRecord(payload: Record<string, unknown>): Promise<{ succ
   if (inserted.error.code === '23505') return { success: true, error: null };
 
   const message = inserted.error.message || '';
-  if (payload.auditor_id && /auditor_id/i.test(message)) {
-    const { auditor_id: _auditorId, ...withoutAuditor } = payload;
-    const retried = await supabase.from('call_records').insert(withoutAuditor);
+
+  // Fallback para call_records estándar
+  if (targetTable === 'call_records' && (/diagnostico_operaciones/i.test(message) || (payload.auditor_id && /auditor_id/i.test(message)))) {
+    const sanitized = { ...payload };
+    if (/diagnostico_operaciones/i.test(message)) delete sanitized.diagnostico_operaciones;
+    if (payload.auditor_id && /auditor_id/i.test(message)) delete sanitized.auditor_id;
+
+    const retried = await supabase.from(targetTable).insert(sanitized);
     if (!retried.error || retried.error.code === '23505') return { success: true, error: null };
-    console.error('[Supabase] Error al guardar call_record:', retried.error);
+    console.error('[Supabase] Error tras reintento sanitizado:', retried.error);
     return { success: false, error: new Error(retried.error.message) };
   }
 
-  console.error('[Supabase] Error al guardar call_record:', inserted.error);
+  console.error(`[Supabase] Error al guardar en ${targetTable}:`, inserted.error);
   return { success: false, error: new Error(message) };
 }
 
-export async function saveCallRecordToSupabase(record: CallRecord, userId?: string): Promise<{ success: boolean; error: Error | null }> {
+export async function saveCallRecordToSupabase(
+  record: CallRecord, 
+  userId?: string,
+  targetTable: 'call_records' | 'operaciones_call_records' = 'call_records'
+): Promise<{ success: boolean; error: Error | null }> {
   try {
-    const dbPayload = mapCallRecordToDb(record, userId);
-    return await writeCallRecord(dbPayload);
+    const dbPayload = mapCallRecordToDb(record, userId, targetTable);
+    return await writeCallRecord(dbPayload, targetTable);
   } catch (err: any) {
-    console.error('[Supabase] Excepción en saveCallRecordToSupabase:', err);
+    console.error(`[Supabase] Excepción en saveCallRecordToSupabase (${targetTable}):`, err);
     return { success: false, error: err };
+  }
+}
+
+/**
+ * Actualiza el estado de fidelización de una llamada en operaciones_call_records (Action Tracker)
+ */
+export async function updateOperationsManagementStatus(
+  callId: string,
+  updates: {
+    estado_gestion: 'pendiente' | 'en_gestion' | 'contactado' | 'convertido_promotor' | 'caso_cerrado';
+    accion_inmediata?: string;
+    resultado_fidelizacion?: string;
+    comentarios_seguimiento?: string;
+    responsable_operaciones?: string;
+  }
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const payload = {
+      ...updates,
+      fecha_gestion: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    const { error } = await supabase
+      .from('operaciones_call_records')
+      .update(payload)
+      .eq('id', callId);
+
+    if (error) {
+      console.error('[Supabase] Error al actualizar estado de operaciones:', error);
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message };
   }
 }
 

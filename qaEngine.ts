@@ -105,7 +105,14 @@ AUDITORÍA DE CALIDAD Y SPEECH ANALYTICS (CLARO CHILE):
 2. Identifica los QUIEBRES de los asesores a nivel de atención (momentos críticos donde el asesor fue cortante, condescendiente, interrumpió al cliente, desinformó, o dejó silencios sin cortesía).
 3. Pronóstico de NPS con la pregunta oficial: "¿Qué tan probable es que recomiendes Claro a un amigo o familiar? Considerando una escala de 0 a 10, donde 0 es 'Nada probable' y 10 es 'Muy probable'".
 4. Tiempo de Silencio Conversacional: Evalúa el silencio considerando ÚNICAMENTE desde que le ingresa la llamada al agente y puede interactuar, separándolo del IVR previo.
-5. Plan de coaching y feedback accionable para el asesor, incluyendo guion sugerido alternativo y plan de acción.`;
+5. Plan de coaching y feedback accionable para el asesor, incluyendo guion sugerido alternativo y plan de acción.
+6. DIAGNÓSTICO OPERATIVO DE DETRACCIÓN (ÁREA DE OPERACIONES):
+- Determina si el cliente es DETRACTOR (tNPS 0 a 6) o si manifiesta frustración/reclamo.
+- Identifica la CAUSA RAÍZ exacta del dolor del cliente (falla de servicio/red, facturación/cobro indebido, logística de terreno/técnicos, fricción de procesos Claro, o llamada reiterada).
+- Desacopla la responsabilidad: indica con claridad si la falla es de la compañía (Claro empresa/sistemas) o del asesor.
+- Evalúa el RIESGO DE CHURN (fuga/pérdida del cliente), detectando si amenazó con SUBTEL, SERNAC o cambiarse a otra compañía.
+- Extrae las citas textuales donde el cliente verbaliza su molestia.
+- Formula un PLAN DE ACCIÓN OPERATIVO concreto: acción inmediata de rescate con el cliente y acción preventiva de proceso para el área operativa correspondiente.`;
 
 export const DEFAULT_CUSTOM_DIRECTIVES = `# DIRECTIVAS ADICIONALES DE CALIBRACIÓN ACTIVA (OPERACIÓN CLARO CHILE)
 # Estas directivas tienen prioridad y adaptan el juicio del motor de IA para la operación diaria.
@@ -388,6 +395,41 @@ export const callAnalysisSchema = {
     alertas: { type: Type.ARRAY, items: { type: Type.STRING } },
     csat_estimado: { type: Type.NUMBER, description: '1 a 5' },
     resolucion_primer_contacto: { type: Type.BOOLEAN },
+    diagnostico_operaciones: {
+      type: Type.OBJECT,
+      description: 'Diagnóstico para el área de Operaciones enfocado en la causa raíz de detracción, riesgo de churn y plan de acción operativo.',
+      properties: {
+        es_detractor: { type: Type.BOOLEAN, description: 'True si el cliente es detractor (tNPS 0-6) o expresa molestia/insatisfacción' },
+        causa_raiz_categoria: {
+          type: Type.STRING,
+          description: 'Categoria de dolor: falla_servicio_red | facturacion_cobranza | logistica_terreno | friccion_procesos | llamada_reiterada | atencion_asesor | consulta_informativa | otro'
+        },
+        causa_raiz_nombre: { type: Type.STRING, description: 'Nombre corto del dolor operativo (ej: "Cobro indebido de roaming", "Corte de fibra óptica sin visita", "Reiteración por 3ra vez")' },
+        causa_raiz_detalle: { type: Type.STRING, description: 'Explicación detallada de por qué el cliente llegó molesto o se convirtió en detractor' },
+        responsabilidad: {
+          type: Type.STRING,
+          description: 'Responsabilidad principal: claro_empresa | asesor | compartida | externa_cliente'
+        },
+        responsabilidad_justificacion: { type: Type.STRING, description: 'Justificación de desacoplamiento: si es falla técnica/proceso de Claro o error de atención del asesor' },
+        riesgo_churn: { type: Type.STRING, description: 'Riesgo de cancelación/portabilidad: critico | medio | bajo' },
+        amenaza_subtel_sernac: { type: Type.BOOLEAN, description: 'True si el cliente menciona reclamo en SUBTEL, SERNAC, demanda o portabilidad inmediata' },
+        llamada_reiterada: { type: Type.BOOLEAN, description: 'True si el cliente indica que ya llamó antes por el mismo problema sin solución' },
+        citas_quiebre_cliente: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+          description: '1 a 3 frases textuales del cliente donde verbaliza su frustración o el motivo de reclamo'
+        },
+        plan_accion_cliente: { type: Type.STRING, description: 'Acción operativa inmediata con el cliente (ej: ajuste en facturación, visita técnica prioritaria, llamado de retención)' },
+        plan_accion_proceso: { type: Type.STRING, description: 'Acción de mejora correctiva en procesos/sistemas Claro para evitar que vuelva a ocurrir' },
+        area_responsable: { type: Type.STRING, description: 'Área operativa responsable: Redes/Soporte Técnico | Facturación | Logística/Terreno | Retenciones | Atención al Cliente' }
+      },
+      required: [
+        'es_detractor', 'causa_raiz_categoria', 'causa_raiz_nombre', 'causa_raiz_detalle',
+        'responsabilidad', 'responsabilidad_justificacion', 'riesgo_churn',
+        'amenaza_subtel_sernac', 'llamada_reiterada', 'citas_quiebre_cliente',
+        'plan_accion_cliente', 'plan_accion_proceso', 'area_responsable'
+      ]
+    },
     agente_nombre_detectado: { type: Type.STRING, description: 'Nombre real del asesor que atiende la llamada' },
     cliente_nombre_detectado: { type: Type.STRING, description: 'Nombre real del cliente mencionado en la llamada (o "Cliente Claro" si no se dice)' },
     segmentos: {
@@ -547,11 +589,31 @@ export function finalizeCallAnalysis(parsed: any, ctx: {
     camino_a_promotor: rawNps.camino_a_promotor || ''
   };
 
+  const rawOps = parsed.diagnostico_operaciones || {};
+  const isDetractor = npsClasif === 'DETRACTOR' || rawOps.es_detractor || false;
+  const normalizedDiagnosticoOperaciones = {
+    es_detractor: isDetractor,
+    causa_raiz_categoria: rawOps.causa_raiz_categoria || (isDetractor ? 'friccion_procesos' : 'consulta_informativa'),
+    causa_raiz_nombre: rawOps.causa_raiz_nombre || (isDetractor ? 'Fricción en servicio o proceso' : 'Atención regular sin detracción'),
+    causa_raiz_detalle: rawOps.causa_raiz_detalle || (isDetractor ? 'El cliente manifiesta inconformidad con el servicio o proceso recibido.' : 'Llamada gestionada sin detracción crítica.'),
+    responsabilidad: rawOps.responsabilidad || (isDetractor ? 'claro_empresa' : 'externa_cliente'),
+    responsabilidad_justificacion: rawOps.responsabilidad_justificacion || (isDetractor ? 'Malestar atribuible a políticas o fallas de servicio de la compañía.' : 'Atención dentro de estándares normales.'),
+    riesgo_churn: rawOps.riesgo_churn || (isDetractor ? (rawOps.amenaza_subtel_sernac ? 'critico' : 'medio') : 'bajo'),
+    amenaza_subtel_sernac: Boolean(rawOps.amenaza_subtel_sernac),
+    llamada_reiterada: Boolean(rawOps.llamada_reiterada),
+    citas_quiebre_cliente: Array.isArray(rawOps.citas_quiebre_cliente) ? rawOps.citas_quiebre_cliente : [],
+    plan_accion_cliente: rawOps.plan_accion_cliente || (isDetractor ? 'Gestionar seguimiento proactivo y verificar resolución del requerimiento.' : 'Ninguna acción correctiva inmediata requerida.'),
+    plan_accion_proceso: rawOps.plan_accion_proceso || (isDetractor ? 'Revisar tiempos de respuesta y cumplimiento de compromisos del área involucrada.' : 'Mantener protocolo estándar.'),
+    area_responsable: rawOps.area_responsable || 'Atención al Cliente'
+  };
+
   const durationSeconds = ctx.durationSeconds || parsed.silencio_analisis?.duracion_total_segundos || 420;
 
   return {
     ...parsed,
-    id: `call-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+    id: typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `call-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
     codigo_llamada: `REC-2026-CHILE-${Math.floor(1000 + Math.random() * 9000)}`,
     fecha_hora: new Date().toISOString().replace('T', ' ').substring(0, 16),
     file_name: fileName,
@@ -566,6 +628,7 @@ export function finalizeCallAnalysis(parsed: any, ctx: {
     modelo_procesado: model,
     qa_score_global: avgScore,
     nps_pronostico: normalizedNpsPronostico,
+    diagnostico_operaciones: normalizedDiagnosticoOperaciones,
     cumplimiento_guion: normalizedCumplimientoGuion,
     segmentos: normalizedSegmentos,
     transcripcion: {

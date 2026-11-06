@@ -5,7 +5,7 @@ import { readCalibration } from '../calibrationStore.ts';
 
 // Supabase client instance for background persistence
 const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://givdlqjfnctxvarpybht.supabase.co';
-const supabaseKey = process.env.SUPABASE_SECRET_KEY || process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_nNtMZhvN0uPRz4QzVnUyPQ_Rs4yyI0D';
+const supabaseKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 const DEFAULT_SECRET = 'gea_n8n_speech_secret_2026';
@@ -74,6 +74,46 @@ function cleanSegments(segments: any[]): any[] {
   }));
 }
 
+/**
+ * Repara automáticamente un JSON de Gemini si fue truncado al final del arreglo "segmentos"
+ * en llamadas muy largas (ej. > 10 MB / > 20 min), conservando el 100% de la auditoría y todos los turnos completos.
+ */
+function parseOrRepairGeminiJson(rawText: string): any {
+  let clean = rawText.trim();
+  if (clean.startsWith('```')) {
+    clean = clean.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+  }
+  try {
+    return JSON.parse(clean);
+  } catch (firstErr) {
+    // Si se truncó dentro de "segmentos": [ ... { ... }, { incompleto
+    const segIdx = clean.lastIndexOf('"segmentos"');
+    if (segIdx !== -1) {
+      let cursor = clean.length;
+      while (cursor > segIdx) {
+        const lastBrace = clean.lastIndexOf('}', cursor - 1);
+        if (lastBrace === -1 || lastBrace <= segIdx) break;
+        const candidate = clean.slice(0, lastBrace + 1) + ']}';
+        try {
+          const recovered = JSON.parse(candidate);
+          console.log(`[Ingest Call] JSON largo auto-reparado con éxito (${recovered.segmentos?.length || 0} segmentos conservados).`);
+          return recovered;
+        } catch {
+          cursor = lastBrace;
+        }
+      }
+      // Si ningún segmento cerró, cerrar arreglo vacío
+      const bracketIdx = clean.indexOf('[', segIdx);
+      if (bracketIdx !== -1) {
+        try {
+          return JSON.parse(clean.slice(0, bracketIdx + 1) + ']}');
+        } catch {}
+      }
+    }
+    throw firstErr;
+  }
+}
+
 function buildWhatsAppMessage(record: any): string {
   const npsClass = record.nps_pronostico?.clasificacion || 'NEUTRO';
   const npsEmoji = npsClass === 'PROMOTOR' ? '🟢' : npsClass === 'DETRACTOR' ? '🔴' : '🟡';
@@ -83,35 +123,162 @@ function buildWhatsAppMessage(record: any): string {
   let quiebresText = '• Ninguno detectado (Atención conforme)';
   if (record.quiebres_atencion && record.quiebres_atencion.length > 0) {
     quiebresText = record.quiebres_atencion
-      .map((q: any) => `• [${q.tiempo || '00:00'}] *${q.tipo || 'Observación'}* (${q.severidad || 'MEDIO'})`)
+      .map((q: any) => `• [${q.tiempo || '00:00'}] *${q.tipo || 'Observación'}* (${q.severidad || 'MEDIO'}): _"${(q.cita || '').slice(0, 75)}"_`)
       .slice(0, 3)
       .join('\n');
   }
 
+  const resumenReal = record.resumen
+    ? `\n📝 *Resumen de la Llamada:*\n${record.resumen}\n🎯 *Motivo:* ${record.motivo_nombre || record.motivo_categoria || 'Consulta'}`
+    : '';
+
   let ojtText = '';
   if (record.diagnostico_ojt) {
     const o = record.diagnostico_ojt;
-    ojtText = `\n👨‍🏫 *Diagnóstico OJT (Piso):*\n• Madurez: ${o.nivel_madurez || 'EN_DESARROLLO'} (${o.indice_autonomia ?? 75}%)\n• Brecha: ${o.brecha_principal || 'Ninguna'}`;
+    ojtText = `\n\n👨‍🏫 *Diagnóstico OJT (Piso):*\n• Madurez: ${o.nivel_madurez || 'EN_DESARROLLO'} (${o.indice_autonomia ?? 75}%)\n• Brecha: ${o.brecha_principal || 'Ninguna'}`;
   }
+
+  const opsText = record.diagnostico_operaciones?.es_detractor
+    ? `\n\n⚙️ *Alerta Operaciones (Causa Raíz Detracción):*\n• Causa: *${record.diagnostico_operaciones.causa_raiz_nombre}*\n• Responsable: *${record.diagnostico_operaciones.responsabilidad}*\n• Riesgo Fuga: *${record.diagnostico_operaciones.riesgo_churn.toUpperCase()}*\n• Acción: _"${record.diagnostico_operaciones.plan_accion_cliente}"_`
+    : '';
 
   return `📊 *AUDITORÍA AUTOMÁTICA SPEECH ANALYTICS*
 ━━━━━━━━━━━━━━━━━━━━━━
+🔖 *Código:* ${record.codigo_llamada}
 👤 *Asesor:* ${record.agente_nombre} (ID: ${record.agente_id})
+🧑 *Cliente:* ${record.cliente_nombre || 'Cliente Claro'}
 📁 *Archivo:* ${record.file_name}
-⏱️ *Duración:* ${record.duracion_total} | Cola: ${record.cola_atencion}
+⏱️ *Duración:* ${record.duracion_total} | Silencio: ${record.silencio_analisis?.porcentaje_silencio ?? 0}%
 
 ${qaEmoji} *QA Score Global:* ${qaScore}%
 ${npsEmoji} *tNPS Pronóstico:* ${record.nps_pronostico?.score ?? '-'}/10 (*${npsClass}*)
-CSAT Estimado: ${record.csat_estimado ?? 4}/5
+CSAT Estimado: ${record.csat_estimado ?? 4}/5 | Sentimiento: ${record.sentimiento_label || 'Neutro'}${resumenReal}
 
 🔍 *Quiebres de Atención:*
-${quiebresText}${ojtText}
+${quiebresText}${ojtText}${opsText}
 
 💡 *Plan de Acción Inmediato:*
 "${record.feedback_coaching?.plan_accion || 'Refuerzo de protocolo estándar'}"
 ━━━━━━━━━━━━━━━━━━━━━━
 🔗 *Ver análisis completo y audio:*
 https://transcripcion-audio-ia.vercel.app`;
+}
+
+/**
+ * Construye el texto estructurado (chunk rico) y los metadatos para la base vectorial (documentos_qa)
+ */
+export function buildVectorDocumentPayload(record: any) {
+  const segs = Array.isArray(record.segmentos) ? record.segmentos : [];
+  const transcriptSnippet = segs
+    .slice(0, 25)
+    .map((s: any) => `${s.hablante === 'agente' ? 'ASESOR' : 'CLIENTE'}: ${s.texto}`)
+    .join('\n');
+
+  const quiebresStr = (record.quiebres_atencion || [])
+    .map((q: any) => `[${q.tiempo}] ${q.tipo} (${q.severidad}): "${q.cita}" -> Impacto: ${q.impacto_cliente}`)
+    .join(' | ');
+
+  const content = [
+    `LLAMADA AUDITADA: ${record.codigo_llamada} | ARCHIVO: ${record.file_name || 'audio.wav'} | FECHA: ${record.fecha_hora}`,
+    `ASESOR: ${record.agente_nombre} (ID: ${record.agente_id}) | CLIENTE: ${record.cliente_nombre} | COLA: ${record.cola_atencion}`,
+    `MÉTRICAS QA: QA Global ${record.qa_score_global}% | tNPS: ${record.nps_pronostico?.score ?? 8}/10 (${record.nps_pronostico?.clasificacion || 'NEUTRO'}) | Sentimiento: ${record.sentimiento_label} (${record.sentimiento_score}) | Silencio: ${record.silencio_analisis?.porcentaje_silencio ?? 0}%`,
+    `MOTIVO / DRIVER: [${record.motivo_categoria}] ${record.motivo_nombre}`,
+    `RESUMEN EJECUTIVO: ${record.resumen}`,
+    `CAUSA RAÍZ OPERACIONES: ${record.diagnostico_operaciones?.causa_raiz_nombre || 'N/A'} | Responsabilidad: ${record.diagnostico_operaciones?.responsabilidad || 'N/A'} | Riesgo Churn: ${record.diagnostico_operaciones?.riesgo_churn || 'bajo'}`,
+    `DIAGNÓSTICO OJT: Madurez ${record.diagnostico_ojt?.nivel_madurez || 'EN_DESARROLLO'} | Brecha: ${record.diagnostico_ojt?.brecha_principal || 'NINGUNA'} | Feedback: ${record.diagnostico_ojt?.feedback_pedagogico || ''}`,
+    `QUIEBRES DETECTADOS: ${quiebresStr || 'Sin quiebres'}`,
+    `EXTRACTO DE TRANSCRIPCIÓN:\n${transcriptSnippet}`
+  ].join('\n');
+
+  const metadata = {
+    source: 'call_audit',
+    call_id: record.id,
+    codigo_llamada: record.codigo_llamada,
+    file_name: record.file_name,
+    fecha_hora: record.fecha_hora,
+    agente_id: record.agente_id,
+    agente_nombre: record.agente_nombre,
+    cola_atencion: record.cola_atencion,
+    motivo_categoria: record.motivo_categoria,
+    motivo_nombre: record.motivo_nombre,
+    qa_score_global: record.qa_score_global,
+    nps_score: record.nps_pronostico?.score ?? 8,
+    nps_clasificacion: record.nps_pronostico?.clasificacion || 'NEUTRO',
+    sentimiento_label: record.sentimiento_label,
+    sentimiento_score: record.sentimiento_score,
+    porcentaje_silencio: record.silencio_analisis?.porcentaje_silencio ?? 0,
+    riesgo_churn: record.diagnostico_operaciones?.riesgo_churn || 'bajo',
+    responsabilidad: record.diagnostico_operaciones?.responsabilidad || 'externa_cliente',
+    quiebres_count: (record.quiebres_atencion || []).length
+  };
+
+  return { content, metadata };
+}
+
+/**
+ * Genera el embedding de 3072 dimensiones con Gemini (gemini-embedding-001) y lo guarda en documentos_qa
+ */
+export async function upsertCallVectorInSupabase(record: any, apiKeys: string[]): Promise<{ synced: boolean; docId?: number; error?: string }> {
+  const { content, metadata } = buildVectorDocumentPayload(record);
+
+  if (!apiKeys || apiKeys.length === 0) {
+    return { synced: false, error: 'Sin GEMINI_API_KEY para generar embedding' };
+  }
+
+  let embeddingValues: number[] | null = null;
+  let lastEmbedErr = '';
+
+  const embedModels = ['gemini-embedding-001', 'text-embedding-004'];
+  for (const modelName of embedModels) {
+    for (const key of apiKeys) {
+      try {
+        const ai = getGenAIClient(key);
+        const embedRes: any = await ai.models.embedContent({
+          model: modelName,
+          contents: content,
+        });
+        const vals = embedRes?.embeddings?.[0]?.values || embedRes?.embedding?.values;
+        if (Array.isArray(vals) && vals.length === 3072) {
+          embeddingValues = vals;
+          break;
+        }
+      } catch (err: any) {
+        lastEmbedErr = err?.message || String(err);
+      }
+    }
+    if (embeddingValues) break;
+  }
+
+  if (!embeddingValues) {
+    return { synced: false, error: `No se obtuvo vector de 3072 dims: ${lastEmbedErr}` };
+  }
+
+  try {
+    // Evitar duplicados si la misma llamada se re-procesa
+    if (record.codigo_llamada) {
+      await supabase
+        .from('documentos_qa')
+        .delete()
+        .contains('metadata', { codigo_llamada: record.codigo_llamada });
+    }
+
+    const { data, error } = await supabase
+      .from('documentos_qa')
+      .insert({
+        content,
+        metadata,
+        embedding: JSON.stringify(embeddingValues)
+      })
+      .select('id')
+      .single();
+
+    if (error) {
+      return { synced: false, error: error.message };
+    }
+    return { synced: true, docId: data?.id };
+  } catch (e: any) {
+    return { synced: false, error: e?.message || String(e) };
+  }
 }
 
 export default async function handler(req: any, res: any) {
@@ -144,10 +311,21 @@ export default async function handler(req: any, res: any) {
     let audioBase64 = '';
     let mimeType = 'audio/wav';
     let fileName = (req.headers['x-file-name'] ? decodeURIComponent(String(req.headers['x-file-name'])) : '') || 'llamada_n8n.wav';
-    let agentName = (req.headers['x-agent-name'] ? decodeURIComponent(String(req.headers['x-agent-name'])) : '') || 'Asesor Claro';
-    let agentId = (req.headers['x-agent-id'] ? decodeURIComponent(String(req.headers['x-agent-id'])) : '') || 'AGT-4821';
+    let agentName = (req.headers['x-agent-name'] ? decodeURIComponent(String(req.headers['x-agent-name'])) : '') || '';
+    let agentId = (req.headers['x-agent-id'] ? decodeURIComponent(String(req.headers['x-agent-id'])) : '') || '';
     let queue = (req.headers['x-queue'] ? decodeURIComponent(String(req.headers['x-queue'])) : '') || 'Exclusivo Postpago Chile';
     let driveUrl = (req.headers['x-drive-url'] ? decodeURIComponent(String(req.headers['x-drive-url'])) : '');
+
+    // Extraer DNI / ID de asesor automáticamente desde el nombre del archivo si viene vacío (ej. "2026.10.30 48590390@geaperu.pe 2.MP3" -> "48590390")
+    if (!agentId && fileName) {
+      const emailMatch = fileName.match(/([0-9]{7,9})@/i);
+      const codeMatch = fileName.match(/\b(AGT[-_]?[0-9A-Za-z]+|AG[-_]?[0-9A-Za-z]+|[0-9]{7,8}[-kK0-9]?)\b/i);
+      if (emailMatch) {
+        agentId = emailMatch[1];
+      } else if (codeMatch) {
+        agentId = codeMatch[1].replace('_', '-');
+      }
+    }
 
     const contentType = String(req.headers['content-type'] || '');
 
@@ -205,10 +383,12 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    const models = ['gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-3.1-pro-preview'];
+    const models = ['gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-flash-latest', 'gemini-3.1-pro-preview'];
     let parsed: any = null;
     let modelUsed = '';
     let lastError = '';
+
+    const ingestPrompt = `${prompt}\n\nNOTA TÉCNICA DE SALIDA: Si la grabación supera los 10 minutos de duración, agrupa las intervenciones consecutivas en 'segmentos' en un máximo de 60 turnos representativos para no exceder el límite de tokens del JSON.`;
 
     for (const model of models) {
       for (const key of apiKeys) {
@@ -221,7 +401,7 @@ export default async function handler(req: any, res: any) {
                 mimeType,
               }
             },
-            { text: prompt }
+            { text: ingestPrompt }
           ];
 
           const response = await ai.models.generateContent({
@@ -229,14 +409,14 @@ export default async function handler(req: any, res: any) {
             contents: parts,
             config: {
               temperature: 0.1,
-              maxOutputTokens: 16384,
+              maxOutputTokens: 65536,
               responseMimeType: 'application/json',
               responseSchema: callAnalysisSchema,
             }
           });
 
           const rawText = response.text?.trim() || '{}';
-          parsed = JSON.parse(rawText);
+          parsed = parseOrRepairGeminiJson(rawText);
           modelUsed = model;
           break;
         } catch (err: any) {
@@ -268,48 +448,114 @@ export default async function handler(req: any, res: any) {
       completeRecord.audio_url = driveUrl;
     }
 
-    // 5. Direct persistence to Supabase call_records
-    const dbPayload = {
-      id: completeRecord.id,
-      codigo_llamada: completeRecord.codigo_llamada,
-      fecha_hora: completeRecord.fecha_hora,
-      agente_nombre: completeRecord.agente_nombre,
-      agente_id: completeRecord.agente_id,
-      cliente_nombre: completeRecord.cliente_nombre,
-      cliente_telefono: completeRecord.cliente_telefono,
-      cola_atencion: completeRecord.cola_atencion,
-      duracion_total: completeRecord.duracion_total,
-      duracion_segundos: Math.round(Number(completeRecord.duracion_segundos) || 0),
-      qa_score_global: Math.round(Number(completeRecord.qa_score_global) || 0),
-      resumen: completeRecord.resumen,
-      motivo_categoria: completeRecord.motivo_categoria,
-      motivo_nombre: completeRecord.motivo_nombre,
-      sentimiento_score: Number(completeRecord.sentimiento_score) || 0,
-      sentimiento_label: completeRecord.sentimiento_label,
-      csat_estimado: Math.round(Number(completeRecord.csat_estimado) || 4),
-      resolucion_primer_contacto: completeRecord.resolucion_primer_contacto,
-      evaluacion_criterios: completeRecord.evaluacion_criterios,
-      cumplimiento_guion: completeRecord.cumplimiento_guion,
-      nps_pronostico: completeRecord.nps_pronostico,
-      diagnostico_ojt: completeRecord.diagnostico_ojt || null,
-      silencio_analisis: completeRecord.silencio_analisis,
-      quiebres_atencion: completeRecord.quiebres_atencion || [],
-      feedback_coaching: completeRecord.feedback_coaching,
-      keywords: completeRecord.keywords || [],
-      alertas: completeRecord.alertas || [],
-      segmentos: cleanSegments(completeRecord.segmentos || completeRecord.transcripcion?.segmentos),
-      audio_url: completeRecord.audio_url || null,
-      file_name: fileName,
-      modelo_procesado: `Ingest n8n (${modelUsed})`,
-      updated_at: new Date().toISOString()
-    };
+    // 5. Direct persistence to Supabase (call_records o operaciones_call_records)
+    const targetTable = (req.query.targetTable === 'operaciones_call_records' || req.query.area === 'operaciones')
+      ? 'operaciones_call_records'
+      : 'call_records';
 
-    const { error: dbError } = await supabase.from('call_records').insert(dbPayload);
-    if (dbError && dbError.code !== '23505') {
-      console.warn('[Ingest Call] Advertencia al guardar en Supabase:', dbError.message);
+    let dbPayload: any;
+    if (targetTable === 'operaciones_call_records') {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(completeRecord.id);
+      const validId = isUuid
+        ? completeRecord.id
+        : (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : completeRecord.id);
+      completeRecord.id = validId;
+
+      dbPayload = {
+        id: validId,
+        codigo_llamada: completeRecord.codigo_llamada,
+        fecha_hora: completeRecord.fecha_hora,
+        agente_nombre: completeRecord.agente_nombre,
+        agente_id: completeRecord.agente_id,
+        cliente_nombre: completeRecord.cliente_nombre,
+        cliente_telefono: completeRecord.cliente_telefono,
+        cola_atencion: completeRecord.cola_atencion,
+        duracion_total: completeRecord.duracion_total,
+        duracion_segundos: Math.round(Number(completeRecord.duracion_segundos) || 0),
+        qa_score_global: Math.round(Number(completeRecord.qa_score_global) || 0),
+        csat_estimado: Math.round(Number(completeRecord.csat_estimado) || 4),
+        nps_pronostico: completeRecord.nps_pronostico,
+        resolucion_primer_contacto: completeRecord.resolucion_primer_contacto,
+        sentimiento_score: Number(completeRecord.sentimiento_score) || 0,
+        sentimiento_label: completeRecord.sentimiento_label,
+        resumen: completeRecord.resumen,
+        motivo_categoria: completeRecord.motivo_categoria,
+        motivo_nombre: completeRecord.motivo_nombre,
+        causa_raiz_categoria: completeRecord.diagnostico_operaciones?.causa_raiz_categoria || 'falla_servicio_red',
+        causa_raiz_nombre: completeRecord.diagnostico_operaciones?.causa_raiz_nombre || 'Falla Técnica / Red & Fibra',
+        causa_raiz_detalle: completeRecord.diagnostico_operaciones?.causa_raiz_detalle || completeRecord.resumen || '',
+        responsabilidad: completeRecord.diagnostico_operaciones?.responsabilidad || 'claro_empresa',
+        responsabilidad_justificacion: completeRecord.diagnostico_operaciones?.responsabilidad_justificacion || '',
+        riesgo_churn: completeRecord.diagnostico_operaciones?.riesgo_churn || 'medio',
+        amenaza_subtel_sernac: Boolean(completeRecord.diagnostico_operaciones?.amenaza_subtel_sernac),
+        llamada_reiterada: Boolean(completeRecord.diagnostico_operaciones?.llamada_reiterada),
+        citas_quiebre_cliente: completeRecord.diagnostico_operaciones?.citas_quiebre_cliente || [],
+        estado_gestion: 'pendiente',
+        segmentos: cleanSegments(completeRecord.segmentos || completeRecord.transcripcion?.segmentos),
+        alertas: completeRecord.alertas || [],
+        quiebres_atencion: completeRecord.quiebres_atencion || [],
+        file_name: fileName,
+        updated_at: new Date().toISOString()
+      };
+    } else {
+      dbPayload = {
+        id: completeRecord.id,
+        codigo_llamada: completeRecord.codigo_llamada,
+        fecha_hora: completeRecord.fecha_hora,
+        agente_nombre: completeRecord.agente_nombre,
+        agente_id: completeRecord.agente_id,
+        cliente_nombre: completeRecord.cliente_nombre,
+        cliente_telefono: completeRecord.cliente_telefono,
+        cola_atencion: completeRecord.cola_atencion,
+        duracion_total: completeRecord.duracion_total,
+        duracion_segundos: Math.round(Number(completeRecord.duracion_segundos) || 0),
+        qa_score_global: Math.round(Number(completeRecord.qa_score_global) || 0),
+        resumen: completeRecord.resumen,
+        motivo_categoria: completeRecord.motivo_categoria,
+        motivo_nombre: completeRecord.motivo_nombre,
+        sentimiento_score: Number(completeRecord.sentimiento_score) || 0,
+        sentimiento_label: completeRecord.sentimiento_label,
+        csat_estimado: Math.round(Number(completeRecord.csat_estimado) || 4),
+        resolucion_primer_contacto: completeRecord.resolucion_primer_contacto,
+        evaluacion_criterios: completeRecord.evaluacion_criterios,
+        cumplimiento_guion: completeRecord.cumplimiento_guion,
+        nps_pronostico: completeRecord.diagnostico_operaciones
+          ? { ...completeRecord.nps_pronostico, diagnostico_operaciones: completeRecord.diagnostico_operaciones }
+          : completeRecord.nps_pronostico,
+        diagnostico_ojt: completeRecord.diagnostico_ojt || null,
+        diagnostico_operaciones: completeRecord.diagnostico_operaciones || null,
+        silencio_analisis: completeRecord.silencio_analisis,
+        quiebres_atencion: completeRecord.quiebres_atencion || [],
+        feedback_coaching: completeRecord.feedback_coaching,
+        keywords: completeRecord.keywords || [],
+        alertas: completeRecord.alertas || [],
+        segmentos: cleanSegments(completeRecord.segmentos || completeRecord.transcripcion?.segmentos),
+        audio_url: completeRecord.audio_url || null,
+        file_name: fileName,
+        modelo_procesado: `Ingest n8n (${modelUsed})`,
+        updated_at: new Date().toISOString()
+      };
     }
 
-    // 6. Generate ready-to-send WhatsApp summary string
+    let { error: dbError } = await supabase.from(targetTable).insert(dbPayload);
+    if (dbError && targetTable === 'call_records' && /diagnostico_operaciones/i.test(dbError.message)) {
+      const { diagnostico_operaciones: _ops, ...withoutOps } = dbPayload;
+      const retry = await supabase.from('call_records').insert(withoutOps);
+      dbError = retry.error;
+    }
+    if (dbError && dbError.code !== '23505') {
+      console.warn(`[Ingest Call] Advertencia al guardar en Supabase (${targetTable}):`, dbError.message);
+    }
+
+    // 6. Auto-vectorize and save in documentos_qa unless skipVector=true (so n8n can either let backend do it or use its own Supabase Vector Store node)
+    const skipAutoVector = req.query?.skipVector === 'true' || req.body?.skipVector === true;
+    const vectorPayload = buildVectorDocumentPayload(completeRecord);
+    let vectorSyncResult: { synced: boolean; docId?: number; error?: string } = { synced: false };
+    if (!skipAutoVector) {
+      vectorSyncResult = await upsertCallVectorInSupabase(completeRecord, apiKeys);
+    }
+
+    // 7. Generate ready-to-send WhatsApp summary string
     const whatsappMessage = buildWhatsAppMessage(completeRecord);
 
     return res.status(200).json({
@@ -335,6 +581,13 @@ export default async function handler(req: any, res: any) {
       diagnosticoOjt: completeRecord.diagnostico_ojt || null,
       feedback: completeRecord.feedback_coaching,
       whatsappSummary: whatsappMessage,
+      vectorDocument: {
+        table: 'documentos_qa',
+        autoSynced: vectorSyncResult.synced,
+        docId: vectorSyncResult.docId || null,
+        content: vectorPayload.content,
+        metadata: vectorPayload.metadata,
+      },
       data: completeRecord
     });
 

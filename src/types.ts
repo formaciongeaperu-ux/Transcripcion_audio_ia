@@ -190,6 +190,7 @@ export interface CallRecord {
   cumplimiento_guion: CumplimientoGuion;
   nps_pronostico: NPSPronostico;
   diagnostico_ojt?: DiagnosticoOJT;
+  diagnostico_operaciones?: DiagnosticoOperaciones;
   silencio_analisis: SilencioAnalisis;
   quiebres_atencion: QuiebreAtencion[];
   feedback_coaching: FeedbackCoaching;
@@ -205,6 +206,47 @@ export interface CallRecord {
   file_size_kb?: number;
   modelo_procesado?: string;
   fecha_analisis?: string;
+  // Gestión de Operaciones (Action Tracker: Detractor -> Promotor)
+  estado_gestion?: 'pendiente' | 'en_gestion' | 'contactado' | 'convertido_promotor' | 'caso_cerrado';
+  accion_inmediata?: string;
+  responsable_operaciones?: string;
+  resultado_fidelizacion?: string;
+  comentarios_seguimiento?: string;
+  fecha_gestion?: string;
+}
+
+export type CausaRaizOperativa =
+  | 'falla_servicio_red'
+  | 'facturacion_cobranza'
+  | 'logistica_terreno'
+  | 'friccion_procesos'
+  | 'llamada_reiterada'
+  | 'atencion_asesor'
+  | 'consulta_informativa'
+  | 'otro';
+
+export type ResponsabilidadFalla =
+  | 'claro_empresa'
+  | 'asesor'
+  | 'compartida'
+  | 'externa_cliente';
+
+export type RiesgoChurn = 'critico' | 'medio' | 'bajo';
+
+export interface DiagnosticoOperaciones {
+  es_detractor: boolean;
+  causa_raiz_categoria: CausaRaizOperativa;
+  causa_raiz_nombre: string;
+  causa_raiz_detalle: string;
+  responsabilidad: ResponsabilidadFalla;
+  responsabilidad_justificacion: string;
+  riesgo_churn: RiesgoChurn;
+  amenaza_subtel_sernac: boolean;
+  llamada_reiterada: boolean;
+  citas_quiebre_cliente: string[];
+  plan_accion_cliente: string;
+  plan_accion_proceso: string;
+  area_responsable: string;
 }
 
 export interface UploadItem {
@@ -271,7 +313,7 @@ export interface CalibrationChatMessage {
   suggestedDirective?: string;
 }
 
-export type UserRole = 'super_admin' | 'supervisor' | 'qa_auditor' | 'agent';
+export type UserRole = 'super_admin' | 'supervisor' | 'qa_auditor' | 'agent' | 'operaciones';
 
 export interface UserProfile {
   id: string;

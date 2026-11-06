@@ -32,6 +32,7 @@ import { CallRecord, SegmentoDialogo, QuiebreAtencion, getNormalizedNPS } from '
 import { RadarChart } from './RadarChart';
 import { ComplianceAuditCard } from './ComplianceAuditCard';
 import { OjtDiagnosisCard } from './OjtDiagnosisCard';
+import { OperationsRootCauseCard } from './OperationsRootCauseCard';
 
 interface CallDetailViewProps {
   call: CallRecord | null;
@@ -853,6 +854,11 @@ export const CallDetailView: React.FC<CallDetailViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* =========================================================================
+          5.5 DIAGNÓSTICO DE OPERACIONES & CAUSA RAÍZ DE DETRACCIÓN (CHURN MITIGATION)
+         ========================================================================= */}
+      <OperationsRootCauseCard call={call} onJumpToTime={jumpToTime} />
 
       {/* =========================================================================
           6. DIAGNÓSTICO OJT - FORMACIÓN EN PUESTO REAL CON CLIENTES VIVOS

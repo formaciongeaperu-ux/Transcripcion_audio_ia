@@ -5,22 +5,16 @@ import {
   Clock, 
   Search, 
   Menu, 
-  PhoneCall, 
   FileSpreadsheet,
   Command,
-  Activity,
-  Filter,
   User,
   LogOut,
-  Shield,
-  CheckCircle2,
   Database,
   Users
 } from 'lucide-react';
 import { GeaLogo } from './GeaLogo';
 import { useAuth } from '../contexts/AuthContext';
 import { UserRole } from '../types';
-import { UserManagementModal } from './UserManagementModal';
 
 interface HeaderProps {
   sidebarOpen: boolean;
@@ -37,6 +31,7 @@ interface HeaderProps {
   isSheetsConnected: boolean;
   sheetsTitle?: string;
   onOpenCommandPalette?: () => void;
+  onOpenUserManagement?: () => void;
   selectedCohort?: string;
   setSelectedCohort?: (cohort: string) => void;
 }
@@ -48,20 +43,18 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenQueue,
   onExport,
   deferredCount,
-  activeCallsCount,
   searchTerm,
-  setSearchTerm,
   onOpenSheets,
   isSheetsConnected,
   sheetsTitle,
   onOpenCommandPalette,
-  selectedCohort = 'all',
-  setSelectedCohort,
+  onOpenUserManagement,
 }) => {
   const { user, profile, openAuthModal, signOut } = useAuth();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [userManagementOpen, setUserManagementOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const isAdmin = profile?.role === 'super_admin';
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -79,6 +72,8 @@ export const Header: React.FC<HeaderProps> = ({
         return { label: 'Admin', color: 'bg-purple-100 text-purple-800 border-purple-200' };
       case 'supervisor':
         return { label: 'Supervisor', color: 'bg-blue-100 text-blue-800 border-blue-200' };
+      case 'operaciones':
+        return { label: 'Operaciones', color: 'bg-rose-100 text-rose-800 border-rose-200' };
       case 'agent':
         return { label: 'Asesor', color: 'bg-amber-100 text-amber-800 border-amber-200' };
       case 'qa_auditor':
@@ -86,14 +81,17 @@ export const Header: React.FC<HeaderProps> = ({
         return { label: 'Auditor QA', color: 'bg-emerald-100 text-emerald-800 border-emerald-200' };
     }
   };
+
+  const roleBadge = getRoleBadge(profile?.role);
+
   return (
-    <header className="sticky top-0 z-30 flex h-16 w-full items-center justify-between border-b border-[#DADCE0] bg-white px-4 shadow-[0_1px_3px_rgba(60,64,67,0.08)] md:px-6">
+    <header className="sticky top-0 z-30 flex h-16 w-full items-center justify-between border-b border-[#DADCE0] bg-white px-4 shadow-[0_1px_3px_rgba(60,64,67,0.06)] md:px-6">
       {/* Left: Hamburger & Claro Enterprise Brand */}
       <div className="flex items-center gap-3">
         <button
           id="btn-toggle-sidebar"
           onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="rounded-full p-2 text-[#5F6368] hover:bg-[#F1F3F4] active:bg-[#E8EAED]"
+          className="rounded-full p-2 text-[#5F6368] transition hover:bg-[#F1F3F4] active:bg-[#E8EAED]"
           title="Alternar menú lateral"
         >
           <Menu className="h-5 w-5" />
@@ -105,7 +103,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
           <div className="flex flex-col justify-center">
             <div className="flex items-center gap-2">
-              <span className="font-['Google_Sans',sans-serif] text-base font-black tracking-tight leading-tight sm:text-lg">
+              <span className="font-display text-base font-black tracking-tight leading-tight sm:text-lg">
                 <span className="text-[#072242]">GEA </span>
                 <span className="text-[#0072CE]">PERÚ</span>
               </span>
@@ -122,18 +120,17 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Middle: Command Bar */}
       <div className="flex max-w-xl flex-1 items-center px-3">
-        {/* Global Command Bar (Click opens CommandPalette or search) */}
         <div 
           onClick={onOpenCommandPalette}
           className="group relative flex h-10 w-full cursor-pointer items-center justify-between rounded-full border border-transparent bg-[#F1F3F4] px-3.5 text-xs text-[#5F6368] transition hover:border-[#DADCE0] hover:bg-white hover:shadow-xs focus-within:border-[#1A73E8] focus-within:bg-white"
         >
-          <div className="flex flex-1 items-center gap-2">
+          <div className="flex flex-1 items-center gap-2 overflow-hidden">
             <Search className="h-4 w-4 shrink-0 text-[#5F6368] group-hover:text-[#1A73E8]" />
             <span className="truncate text-xs text-[#5F6368]">
               {searchTerm ? `Búsqueda: "${searchTerm}"` : 'Buscar por asesor, ID, RUT, motivo o alerta...'}
             </span>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 shrink-0">
             <kbd className="hidden items-center gap-0.5 rounded-md border border-[#DADCE0] bg-white px-1.5 py-0.5 font-mono text-[10px] font-bold text-[#5F6368] shadow-2xs sm:inline-flex">
               <Command className="h-2.5 w-2.5" /> K
             </kbd>
@@ -144,7 +141,7 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Right: Live SLA & Operational Buttons */}
       <div className="flex items-center gap-2 sm:gap-2.5">
         {/* Live Pipeline Status */}
-        <div className="hidden items-center gap-1.5 rounded-full border border-[#CEEAD6] bg-[#E6F4EA] px-3 py-1.5 text-xs font-semibold text-[#137333] lg:flex">
+        <div className="hidden items-center gap-1.5 rounded-full border border-[#CEEAD6] bg-[#E6F4EA] px-3 py-1.5 text-xs font-semibold text-[#137333] xl:flex">
           <span className="relative flex h-2 w-2">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#34A853] opacity-75"></span>
             <span className="relative inline-flex h-2 w-2 rounded-full bg-[#34A853]"></span>
@@ -152,31 +149,27 @@ export const Header: React.FC<HeaderProps> = ({
           <span className="text-[11px]">SLA 99.8% Online</span>
         </div>
 
-        {/* Deferred 429 Queue button */}
-        <button
-          id="btn-open-queue"
-          onClick={onOpenQueue}
-          className={`relative flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
-            deferredCount > 0
-              ? 'border-[#FBBC05] bg-[#FEF7E0] text-[#B06000] hover:bg-[#FEEFC3]'
-              : 'border-[#DADCE0] bg-white text-[#5F6368] hover:bg-[#F8F9FA]'
-          }`}
-          title="Cola diferida de resiliencia ante errores 429"
-        >
-          <Clock className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">Cola 429</span>
-          {deferredCount > 0 && (
+        {/* Deferred 429 Queue indicator (highlighted when items exist) */}
+        {deferredCount > 0 && (
+          <button
+            id="btn-open-queue"
+            onClick={onOpenQueue}
+            className="relative flex items-center gap-1.5 rounded-full border border-[#FBBC05] bg-[#FEF7E0] px-3 py-1.5 text-xs font-semibold text-[#B06000] transition hover:bg-[#FEEFC3]"
+            title="Cola diferida de resiliencia ante errores 429"
+          >
+            <Clock className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Cola 429</span>
             <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#EA4335] text-[10px] font-bold text-white">
               {deferredCount}
             </span>
-          )}
-        </button>
+          </button>
+        )}
 
-        {/* Google Sheets Database Button */}
+        {/* Google Sheets Status Pill */}
         <button
           id="btn-sheets-integration"
           onClick={onOpenSheets}
-          className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold shadow-xs transition ${
+          className={`hidden items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold shadow-2xs transition md:flex ${
             isSheetsConnected
               ? 'border-[#CEEAD6] bg-[#E6F4EA] text-[#137333] hover:bg-[#CEEAD6]'
               : 'border-[#DADCE0] bg-white text-[#3C4043] hover:bg-[#F8F9FA]'
@@ -184,61 +177,59 @@ export const Header: React.FC<HeaderProps> = ({
           title={isSheetsConnected ? `Base conectada: ${sheetsTitle || 'Google Sheets'}` : 'Conectar Base de Datos Google Sheets'}
         >
           <FileSpreadsheet className={`h-3.5 w-3.5 ${isSheetsConnected ? 'text-[#137333]' : 'text-[#0F9D58]'}`} />
-          <span className="hidden sm:inline">
-            {isSheetsConnected ? 'Sheets Conectado' : 'Google Sheets'}
+          <span className="hidden lg:inline">
+            {isSheetsConnected ? 'Sheets Activo' : 'Google Sheets'}
           </span>
           {isSheetsConnected && (
             <span className="h-2 w-2 rounded-full bg-[#137333]"></span>
           )}
         </button>
 
-        {/* Export Excel / CSV button */}
+        {/* Export Excel button */}
         <button
           id="btn-export-excel"
           onClick={onExport}
-          className="hidden items-center gap-1.5 rounded-full border border-[#DADCE0] bg-white px-3 py-1.5 text-xs font-medium text-[#3C4043] shadow-sm transition hover:bg-[#F8F9FA] active:bg-[#F1F3F4] md:flex"
+          className="hidden items-center gap-1.5 rounded-full border border-[#DADCE0] bg-white px-3 py-1.5 text-xs font-medium text-[#3C4043] shadow-2xs transition hover:bg-[#F8F9FA] active:bg-[#F1F3F4] lg:flex"
           title="Exportar base completa a Excel (.xlsx)"
         >
           <Download className="h-3.5 w-3.5 text-[#1A73E8]" />
           <span>Exportar</span>
         </button>
 
-        {/* Upload Audio Primary Button (Claro Red / Blue) */}
+        {/* Upload Audio Primary CTA */}
         <button
           id="btn-primary-upload"
           onClick={onOpenUpload}
-          className="flex items-center gap-1.5 rounded-full bg-[#DA291C] px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-[#C5221F] active:scale-95 sm:px-4"
+          className="flex items-center gap-1.5 rounded-full bg-[#DA291C] px-3.5 py-2 text-xs font-semibold text-white shadow-xs transition hover:bg-[#C5221F] active:scale-95 sm:px-4 cursor-pointer"
         >
           <Upload className="h-4 w-4" />
           <span className="hidden sm:inline">Cargar Audios</span>
           <span className="sm:hidden">Cargar</span>
         </button>
 
-        {/* Supabase User Profile & Authentication Button */}
+        {/* User Profile & Authentication Dropdown */}
         <div className="relative" ref={menuRef}>
           {user ? (
             <button
               id="btn-user-profile"
               onClick={() => setUserMenuOpen(!userMenuOpen)}
-              className="flex items-center gap-2 rounded-full border border-[#DADCE0] bg-white py-1 pl-1 pr-2.5 shadow-2xs transition hover:bg-[#F8F9FA]"
+              className="flex items-center gap-2 rounded-full border border-[#DADCE0] bg-white py-1 pl-1 pr-2.5 shadow-2xs transition hover:bg-[#F8F9FA] cursor-pointer"
             >
               <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[#0B192C] text-xs font-bold text-white shadow-xs">
                 {(profile?.full_name || user.email || 'U').slice(0, 2).toUpperCase()}
               </div>
               <div className="hidden flex-col text-left lg:flex">
-                <span className="text-xs font-bold leading-tight text-[#202124] max-w-[110px] truncate">
+                <span className="text-xs font-bold leading-tight text-[#202124] max-w-[115px] truncate">
                   {profile?.full_name || user.email?.split('@')[0]}
                 </span>
-                <span className="text-[10px] text-[#5F6368] leading-tight">
-                  {getRoleBadge(profile?.role).label}
+                <span className="text-[10px] text-[#5F6368] leading-tight truncate max-w-[115px]">
+                  {profile?.campana || 'Operación Claro'}
                 </span>
               </div>
               <span
-                className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${
-                  getRoleBadge(profile?.role).color
-                }`}
+                className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${roleBadge.color}`}
               >
-                {getRoleBadge(profile?.role).label}
+                {roleBadge.label}
               </span>
             </button>
           ) : (
@@ -262,11 +253,9 @@ export const Header: React.FC<HeaderProps> = ({
                 <div className="text-[11px] text-[#5F6368] truncate">{user.email}</div>
                 <div className="mt-2 flex items-center gap-2">
                   <span
-                    className={`inline-block rounded-full border px-2 py-0.5 text-[10px] font-bold ${
-                      getRoleBadge(profile?.role).color
-                    }`}
+                    className={`inline-block rounded-full border px-2 py-0.5 text-[10px] font-bold ${roleBadge.color}`}
                   >
-                    Rol: {getRoleBadge(profile?.role).label}
+                    Rol: {roleBadge.label}
                   </span>
                   {profile?.campana && (
                     <span className="text-[10px] font-medium text-[#80868B]">
@@ -281,25 +270,27 @@ export const Header: React.FC<HeaderProps> = ({
                 <span>Base en Nube: <strong className="text-[#137333]">Supabase Conectado</strong></span>
               </div>
 
-              {/* Botón Gestión de Usuarios y Roles */}
-              <button
-                id="btn-user-management-open"
-                onClick={() => {
-                  setUserMenuOpen(false);
-                  setUserManagementOpen(true);
-                }}
-                className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-[#1A73E8] hover:bg-[#E8F0FE] transition"
-              >
-                <Users className="h-4 w-4 text-[#1A73E8]" />
-                <span>Gestión de Usuarios & Roles</span>
-              </button>
+              {/* Botón Gestión de Usuarios y Roles solo para Super Admin */}
+              {isAdmin && onOpenUserManagement && (
+                <button
+                  id="btn-user-management-open"
+                  onClick={() => {
+                    setUserMenuOpen(false);
+                    onOpenUserManagement();
+                  }}
+                  className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-[#1A73E8] hover:bg-[#E8F0FE] transition cursor-pointer"
+                >
+                  <Users className="h-4 w-4 text-[#1A73E8]" />
+                  <span>Gestión de Usuarios & Roles</span>
+                </button>
+              )}
 
               <button
                 onClick={() => {
                   setUserMenuOpen(false);
                   signOut();
                 }}
-                className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-[#C5221F] hover:bg-[#FCE8E6] transition"
+                className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-[#C5221F] hover:bg-[#FCE8E6] transition cursor-pointer"
               >
                 <LogOut className="h-4 w-4" />
                 <span>Cerrar Sesión</span>
@@ -308,12 +299,6 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
       </div>
-
-      {/* Modal de Gestión de Usuarios y Roles para Administradores */}
-      <UserManagementModal
-        isOpen={userManagementOpen}
-        onClose={() => setUserManagementOpen(false)}
-      />
     </header>
   );
 };

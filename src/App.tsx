@@ -5,6 +5,8 @@ import { DashboardView } from './components/DashboardView';
 import { CallsExplorerView } from './components/CallsExplorerView';
 import { CallDetailView } from './components/CallDetailView';
 import { CalibrationView } from './components/CalibrationView';
+import { OperationsEngineeringView } from './components/OperationsEngineeringView';
+import { NeuralAgentView } from './components/NeuralAgentView';
 import { UploadModal } from './components/UploadModal';
 import { DeferredQueueModal } from './components/DeferredQueueModal';
 import { SheetsModal } from './components/SheetsModal';
@@ -18,7 +20,7 @@ import { exportCallsToExcel, exportCallsToCSV, exportSingleCallReport } from './
 import { SpreadsheetInfo, appendCallsToSpreadsheet } from './services/sheetsService';
 import { DriveFolderInfo, uploadAudioToDrive } from './services/driveService';
 import { getAccessToken } from './services/googleAuth';
-import { fetchCallRecordsFromSupabase, saveCallRecordToSupabase } from './services/supabaseService';
+import { fetchCallRecordsFromSupabase, fetchCallRecordDetailFromSupabase, saveCallRecordToSupabase } from './services/supabaseService';
 import { analyzeUploadedCall } from './services/analyzeCall';
 import { useAuth } from './contexts/AuthContext';
 
@@ -65,15 +67,22 @@ export default function App() {
   }, []);
 
   const reloadFromDatabase = React.useCallback(async (forceAll = false) => {
-    const lastSync = !forceAll ? localStorage.getItem('claro_speech_last_sync') : null;
-    const { data, error } = await fetchCallRecordsFromSupabase(
-      lastSync ? { since: lastSync } : { limit: 300 }
-    );
+    const isOps = profile?.role === 'operaciones';
+    const targetTable: 'call_records' | 'operaciones_call_records' = isOps ? 'operaciones_call_records' : 'call_records';
+    const sKey = isOps ? 'claro_ops_last_sync' : 'claro_speech_last_sync';
+    const fKey = isOps ? 'claro_ops_full_v1' : 'claro_speech_full_v3';
+
+    const lastSync = !forceAll ? localStorage.getItem(sKey) : null;
+    const { data, error } = await fetchCallRecordsFromSupabase({
+      targetTable,
+      ...(lastSync ? { since: lastSync } : { limit: 5000 })
+    });
     if (error) {
-      setDbNotice({ tone: 'error', text: error?.message || 'No se pudo leer call_records.' });
+      setDbNotice({ tone: 'error', text: error?.message || `No se pudo leer ${targetTable}.` });
       return null;
     }
-    localStorage.setItem('claro_speech_last_sync', new Date().toISOString());
+    localStorage.setItem(fKey, 'true');
+    localStorage.setItem(sKey, new Date().toISOString());
     if (data && data.length > 0) {
       setCalls((prev) => {
         const map = new Map<string, CallRecord>();
@@ -85,9 +94,9 @@ export default function App() {
       });
     }
     return data;
-  }, []);
+  }, [profile?.role]);
 
-    // Sincronización optimizada: usa caché local inmediata y solo descarga novedades de Supabase (ahorra 95% de Egress)
+  // Sincronización optimizada: usa caché local inmediata y solo descarga novedades de Supabase (ahorra 95% de Egress)
   useEffect(() => {
     if (authLoading) return;
     if (!user) {
@@ -98,24 +107,31 @@ export default function App() {
       return;
     }
 
+    const isOps = profile?.role === 'operaciones';
+    const targetTable: 'call_records' | 'operaciones_call_records' = isOps ? 'operaciones_call_records' : 'call_records';
+    const cKey = isOps ? 'claro_ops_calls_v1' : 'claro_speech_calls_v2';
+    const sKey = isOps ? 'claro_ops_last_sync' : 'claro_speech_last_sync';
+    const fKey = isOps ? 'claro_ops_full_v1' : 'claro_speech_full_v3';
+
     let isMounted = true;
     (async () => {
       // 1. Cargar caché local de inmediato para render instantáneo
       let local: CallRecord[] = [];
       try {
-        const raw = localStorage.getItem('claro_speech_calls_v2');
+        const raw = localStorage.getItem(cKey);
         if (raw) {
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed)) local = parsed;
         }
       } catch {}
 
-      const lastSync = localStorage.getItem('claro_speech_last_sync');
+      const lastSync = localStorage.getItem(sKey);
+      const hasFullInitialLoad = localStorage.getItem(fKey);
 
       // 2. Consulta delta: solo pedir registros nuevos si ya tenemos caché local
-      const fetchOpts = local.length > 0 && lastSync
-        ? { since: lastSync }
-        : { limit: 300 };
+      const fetchOpts = local.length > 300 && lastSync && hasFullInitialLoad
+        ? { since: lastSync, targetTable }
+        : { limit: 5000, targetTable };
 
       const res = await fetchCallRecordsFromSupabase(fetchOpts);
       if (!isMounted) return;
@@ -125,7 +141,8 @@ export default function App() {
         return;
       }
 
-      localStorage.setItem('claro_speech_last_sync', new Date().toISOString());
+      localStorage.setItem(fKey, 'true');
+      localStorage.setItem(sKey, new Date().toISOString());
 
       const remoteRows = res.data || [];
       const combinedMap = new Map<string, CallRecord>();
@@ -138,23 +155,52 @@ export default function App() {
 
       applyDatabaseRows(mergedCalls);
 
-      // 3. Sincronizar en segundo plano llamadas locales que falten en el servidor
-      const remoteIds = new Set(remoteRows.map((r) => r.id));
-      const missing = local.filter((c) => c?.id && !remoteIds.has(c.id));
-      for (const call of missing) {
-        const saved = await saveCallRecordToSupabase(call, user.id);
-        if (!isMounted) return;
-        if (saved.success) unsavedRef.current.delete(call.id);
-        else unsavedRef.current.set(call.id, call);
+      // 3. Sincronizar en segundo plano SOLO las llamadas pendientes de guardar de esta sesión (cero re-subidas duplicadas)
+      if (unsavedRef.current.size > 0) {
+        const pendingList: CallRecord[] = Array.from(unsavedRef.current.values());
+        for (const call of pendingList) {
+          const saved = await saveCallRecordToSupabase(call, user.id, targetTable);
+          if (!isMounted) return;
+          if (saved.success) unsavedRef.current.delete(call.id);
+        }
       }
     })();
 
     return () => {
       isMounted = false;
     };
-  }, [user, authLoading, applyDatabaseRows]);
+  }, [user, authLoading, profile?.role, applyDatabaseRows]);
+
+  // Carga bajo demanda del detalle completo de la llamada seleccionada (segmentos y transcripción) para ahorrar 99% de Egress
+  useEffect(() => {
+    if (!selectedCall?.id) return;
+    if (Array.isArray(selectedCall.segmentos) && selectedCall.segmentos.length > 0) return;
+
+    let isCurrent = true;
+    const targetTable: 'call_records' | 'operaciones_call_records' = profile?.role === 'operaciones'
+      ? 'operaciones_call_records'
+      : 'call_records';
+
+    fetchCallRecordDetailFromSupabase(selectedCall.id, targetTable).then((res) => {
+      if (!isCurrent || !res.data) return;
+      const fullCall = res.data;
+      setSelectedCall(fullCall);
+      setCalls((prev) => prev.map((c) => (c.id === fullCall.id ? fullCall : c)));
+    });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [selectedCall?.id, profile?.role]);
 
 // Listener visibilitychange eliminado para evitar gasto innecesario de Egress
+
+  // Auto-switch to Operations Workbench if user is logged in as Operaciones
+  useEffect(() => {
+    if (profile?.role === 'operaciones') {
+      setActiveTab('operations');
+    }
+  }, [profile?.role]);
 
   // Global keyboard shortcut Ctrl+K / Cmd+K to open Command Palette
   useEffect(() => {
@@ -284,11 +330,12 @@ export default function App() {
         const { audioFile, ...rest } = c;
         return rest;
       });
-      localStorage.setItem('claro_speech_calls_v2', JSON.stringify(serializable));
+      const cKey = profile?.role === 'operaciones' ? 'claro_ops_calls_v1' : 'claro_speech_calls_v2';
+      localStorage.setItem(cKey, JSON.stringify(serializable));
     } catch (e) {
       console.warn('Error al persistir llamadas en localStorage', e);
     }
-  }, [calls, authLoading]);
+  }, [calls, authLoading, profile?.role]);
 
   // Keep selectedCall in sync if calls change
   useEffect(() => {
@@ -300,6 +347,23 @@ export default function App() {
       setSelectedCall(null);
     }
   }, [calls, selectedCall]);
+
+  // Attach local audio file to an existing call record so user can listen in real time
+  const handleAttachAudioFile = React.useCallback((callId: string, file: File) => {
+    const newUrl = URL.createObjectURL(file);
+    setCalls((prev) =>
+      prev.map((c) =>
+        c.id === callId
+          ? { ...c, audioFile: file, audio_url: newUrl, file_name: file.name }
+          : c
+      )
+    );
+    setSelectedCall((prev) =>
+      prev && prev.id === callId
+        ? { ...prev, audioFile: file, audio_url: newUrl, file_name: file.name }
+        : prev
+    );
+  }, []);
 
   // Handle call selection
   const handleSelectCall = (call: CallRecord) => {
@@ -313,7 +377,11 @@ export default function App() {
     if (newCalls.length === 0) return { failedIds: [], message: '' };
     setCalls((prev) => [...newCalls, ...prev]);
     setSelectedCall(newCalls[0]);
-    setActiveTab('audit');
+    if (profile?.role === 'operaciones') {
+      setActiveTab('operations');
+    } else {
+      setActiveTab('audit');
+    }
 
     // Auto-sync with connected Google Sheets & Drive if enabled
       if (connectedSpreadsheet && autoSyncSheets) {
@@ -349,8 +417,12 @@ export default function App() {
 
       const failedIds: string[] = [];
       let firstError = '';
+      const targetTable: 'call_records' | 'operaciones_call_records' = profile?.role === 'operaciones'
+        ? 'operaciones_call_records'
+        : 'call_records';
+
       for (const call of newCalls) {
-        const saved = await saveCallRecordToSupabase(call, user?.id);
+        const saved = await saveCallRecordToSupabase(call, user?.id, targetTable);
         if (saved.success) {
           unsavedRef.current.delete(call.id);
         } else {
@@ -483,6 +555,7 @@ export default function App() {
         isSheetsConnected={!!connectedSpreadsheet}
         sheetsTitle={connectedSpreadsheet?.title}
         onOpenCommandPalette={() => setCommandPaletteOpen(true)}
+        onOpenUserManagement={() => setUserManagementOpen(true)}
         selectedCohort={selectedCohort}
         setSelectedCohort={setSelectedCohort}
       />
@@ -542,6 +615,18 @@ export default function App() {
               />
             )}
 
+            {activeTab === 'operations' && (
+              <OperationsEngineeringView
+                calls={visibleCalls}
+                onSelectCall={handleSelectCall}
+                onExportCalls={handleExportFiltered}
+                onUpdateCall={(updated) => {
+                  setCalls((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+                  if (selectedCall?.id === updated.id) setSelectedCall(updated);
+                }}
+              />
+            )}
+
             {activeTab === 'explorer' && (
               <CallsExplorerView
                 calls={visibleCalls}
@@ -557,6 +642,14 @@ export default function App() {
                 onBackToList={() => setActiveTab('explorer')}
                 onExportCall={handleExportSingle}
                 onOpenUpload={() => setUploadModalOpen(true)}
+                calls={visibleCalls}
+                onSelectCall={handleSelectCall}
+                onAttachAudioFile={handleAttachAudioFile}
+              />
+            )}
+
+            {activeTab === 'neural' && profile?.role === 'super_admin' && (
+              <NeuralAgentView
                 calls={visibleCalls}
                 onSelectCall={handleSelectCall}
               />
